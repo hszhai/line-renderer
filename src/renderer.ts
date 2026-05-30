@@ -192,9 +192,20 @@ export class GaussianSplatRenderer {
     const w = this.viewportWidth;
     const h = this.viewportHeight;
 
-    // Focal lengths in pixels
-    const focalX = w / (2 * Math.tan(Math.PI / 8));
-    const focalY = h / (2 * Math.tan(Math.PI / 8));
+    // Focal lengths in pixels, derived from the actual projection matrix so
+    // they track the real fov AND aspect ratio. projMatrix[0] = f/aspect and
+    // projMatrix[5] = f, so these come out equal (square pixels) regardless of
+    // window shape. (Hardcoding w/(2·tan(fov/2)) for X was aspect-wrong: it
+    // stretched every splat horizontally by the window's aspect ratio.)
+    const focalX = projMatrix[0] * w * 0.5;
+    const focalY = projMatrix[5] * h * 0.5;
+
+    // View rotation W (upper-left 3x3 of the column-major view matrix), as rows.
+    // EWA splatting needs the covariance in CAMERA space, so we rotate each
+    // Gaussian's world rotation by W before projecting: Σ_2D = J·W·Σ·Wᵀ·Jᵀ.
+    const w00 = viewMatrix[0], w01 = viewMatrix[4], w02 = viewMatrix[8];
+    const w10 = viewMatrix[1], w11 = viewMatrix[5], w12 = viewMatrix[9];
+    const w20 = viewMatrix[2], w21 = viewMatrix[6], w22 = viewMatrix[10];
 
     // Project all Gaussians to 2D on the CPU
     for (let i = 0; i < this.numGaussians; i++) {
@@ -212,16 +223,28 @@ export class GaussianSplatRenderer {
 
       pg.depth = -z;
 
-      // Build 3D covariance: Σ = R * S * S^T * R^T
-      const R = quatToMat3(g.rotation);
+      // Build 3D covariance in CAMERA space: Σ = (R_cam·S)(R_cam·S)^T,
+      // where R_cam = W · R_world rotates the splat into the camera frame.
+      const Rw = quatToMat3(g.rotation); // world-space rotation (row-major)
       const sx = g.scale[0];
       const sy = g.scale[1];
       const sz = g.scale[2];
 
-      // RS = R * diag(sx, sy, sz)
-      const rs0 = R[0] * sx, rs1 = R[1] * sy, rs2 = R[2] * sz;
-      const rs3 = R[3] * sx, rs4 = R[4] * sy, rs5 = R[5] * sz;
-      const rs6 = R[6] * sx, rs7 = R[7] * sy, rs8 = R[8] * sz;
+      // R_cam = W * Rw  (camera-space rotation)
+      const c0 = w00 * Rw[0] + w01 * Rw[3] + w02 * Rw[6];
+      const c1 = w00 * Rw[1] + w01 * Rw[4] + w02 * Rw[7];
+      const c2 = w00 * Rw[2] + w01 * Rw[5] + w02 * Rw[8];
+      const c3 = w10 * Rw[0] + w11 * Rw[3] + w12 * Rw[6];
+      const c4 = w10 * Rw[1] + w11 * Rw[4] + w12 * Rw[7];
+      const c5 = w10 * Rw[2] + w11 * Rw[5] + w12 * Rw[8];
+      const c6 = w20 * Rw[0] + w21 * Rw[3] + w22 * Rw[6];
+      const c7 = w20 * Rw[1] + w21 * Rw[4] + w22 * Rw[7];
+      const c8 = w20 * Rw[2] + w21 * Rw[5] + w22 * Rw[8];
+
+      // RS = R_cam * diag(sx, sy, sz)
+      const rs0 = c0 * sx, rs1 = c1 * sy, rs2 = c2 * sz;
+      const rs3 = c3 * sx, rs4 = c4 * sy, rs5 = c5 * sz;
+      const rs6 = c6 * sx, rs7 = c7 * sy, rs8 = c8 * sz;
 
       // Sigma = RS * (RS)^T
       const sig00 = rs0 * rs0 + rs1 * rs1 + rs2 * rs2;
