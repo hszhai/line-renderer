@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3DGS Sandbox — Triangle from 3 Splats</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(20, 20, 20, 0.85);
+      padding: 16px 20px;
+      border-radius: 8px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 320px;
+    }
+    #panel h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: #4fc3f7;
+      letter-spacing: 0.5px;
+    }
+    #panel p {
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+    #panel code { color: #ffd479; }
+    .legend { font-size: 12px; line-height: 1.8; }
+    .legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+    .control { margin-top: 12px; font-size: 12px; color: #ccc; }
+    .control input { margin-right: 6px; vertical-align: middle; }
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #4fc3f7;
+      margin: 16px 0 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(79, 195, 247, 0.2);
+    }
+    .slider { margin-bottom: 12px; }
+    .slider label {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
+    .slider input[type="range"] {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+    }
+    .slider select {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .slider .val {
+      font-size: 11px;
+      color: #888;
+      text-align: right;
+      margin-top: 2px;
+    }
+    .hint {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 11px;
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="panel">
+    <h1>3DGS Sandbox · Triangle</h1>
+    <p>Three points connected by edges. <strong>One stretched splat per edge does link its points</strong> — but a Gaussian's tails never end, so it overshoots past them (shrink "Along-edge σ" to trade overshoot for fading ends). Switch to <strong>beads</strong> for uniform brightness with clean ends.</p>
+    <div class="legend">
+      <div><span style="background:#ff5959"></span>edge A → B</div>
+      <div><span style="background:#59ff73"></span>edge B → C</div>
+      <div><span style="background:#6688ff"></span>edge C → A</div>
+    </div>
+    <label class="control">
+      <input type="checkbox" id="show-points" checked />
+      Show the 3 original points (colored dots)
+    </label>
+
+    <div class="section-title">Splat Params</div>
+    <div class="slider">
+      <label>Edge Representation</label>
+      <select id="edgeMode" title="Edge representation">
+        <option value="single">Single stretched splat</option>
+        <option value="beads">Many small splats (beads)</option>
+      </select>
+    </div>
+    <div class="slider" id="edgeSigma-row">
+      <label>Along-edge σ <span style="color:#666">(0.5 ≈ ends at 2σ)</span></label>
+      <input type="range" id="edgeSigma" min="0.15" max="1.2" step="0.05" value="0.5" />
+      <div class="val" id="edgeSigma-val">0.50 × ½-len</div>
+    </div>
+    <div class="slider" id="splatsPerEdge-row">
+      <label>Splats / Edge <span style="color:#666">(low = blobs, high = tube)</span></label>
+      <input type="range" id="splatsPerEdge" min="2" max="40" step="1" value="14" />
+      <div class="val" id="splatsPerEdge-val">14</div>
+    </div>
+    <div class="slider">
+      <label>Tube Radius <span style="color:#666">(edge σ x/y)</span></label>
+      <input type="range" id="tubeRadius" min="0.005" max="0.2" step="0.005" value="0.04" />
+      <div class="val" id="tubeRadius-val">0.040</div>
+    </div>
+    <div class="slider">
+      <label>Point Size <span style="color:#666">(vertex dot radius)</span></label>
+      <input type="range" id="pointSize" min="0.01" max="0.3" step="0.005" value="0.072" />
+      <div class="val" id="pointSize-val">0.072</div>
+    </div>
+    <div class="slider">
+      <label>Opacity</label>
+      <input type="range" id="opacity" min="0.05" max="1" step="0.05" value="1" />
+      <div class="val" id="opacity-val">1.00</div>
+    </div>
+    <div class="slider">
+      <label>Global Scale <span style="color:#666">(all axes)</span></label>
+      <input type="range" id="globalScale" min="0.2" max="3" step="0.1" value="1" />
+      <div class="val" id="globalScale-val">1.0×</div>
+    </div>
+
+    <div class="hint">
+      Each splat = <code>position</code> + <code>scale</code> (σ x/y/z) + <code>rotation</code> (quat) + color + opacity.<br><br>
+      Left-drag to orbit, scroll to zoom. See <code>src/sandbox.ts</code> for the commented code.
+    </div>
+  </div>
+  <script type="module" src="/src/sandbox.ts"></script>
+</body>
+</html>
