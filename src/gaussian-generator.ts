@@ -1,6 +1,6 @@
 import { Edge, getEdgeDirection, getEdgeMidpoint } from './edge-extractor.ts';
 import { Mesh } from './obj-loader.ts';
-import { quatFromVectors, Vec3, vec3, v3dot, v3length, v3normalize, v3sub } from './math.ts';
+import { quatFromVectors, Vec3, WORLD_SCALE } from './math.ts';
 
 export interface Gaussian3D {
   position: Vec3;
@@ -56,9 +56,7 @@ export function edgesToGaussians(
     const rot = quatFromVectors([0, 0, 1], dir);
 
     // Convert pixel-like thickness to world-space scale.
-    // The bunny is ~0.15 units tall; at distance ~0.8 with 45° FOV,
-    // 1 px ≈ 0.00035 world units. We use 0.0003 as a practical factor.
-    const worldThickness = lineWidth * 0.0003;
+    const worldThickness = lineWidth * WORLD_SCALE;
     const scale: Vec3 = [worldThickness, worldThickness, len * 0.5 + worldThickness];
 
     gaussians.push({

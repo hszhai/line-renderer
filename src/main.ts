@@ -50,10 +50,14 @@ async function main() {
   const colorSelect = document.getElementById('color') as HTMLSelectElement;
   const edgeCountDisplay = document.getElementById('edge-count') as HTMLSpanElement;
 
-  const curveNormalInput = document.getElementById('curve-normal') as HTMLInputElement;
-  const curveNormalVal = document.getElementById('curve-normal-val') as HTMLDivElement;
-  const curveTangentInput = document.getElementById('curve-tangent') as HTMLInputElement;
-  const curveTangentVal = document.getElementById('curve-tangent-val') as HTMLDivElement;
+  const curveRadiusInput = document.getElementById('curve-radius') as HTMLInputElement;
+  const curveRadiusVal = document.getElementById('curve-radius-val') as HTMLDivElement;
+  const curveOverlapInput = document.getElementById('curve-overlap') as HTMLInputElement;
+  const curveOverlapVal = document.getElementById('curve-overlap-val') as HTMLDivElement;
+  const curveScaleMulInput = document.getElementById('curve-scalemul') as HTMLInputElement;
+  const curveScaleMulVal = document.getElementById('curve-scalemul-val') as HTMLDivElement;
+  const curveOpacityInput = document.getElementById('curve-opacity') as HTMLInputElement;
+  const curveOpacityVal = document.getElementById('curve-opacity-val') as HTMLDivElement;
   const curveTmultInput = document.getElementById('curve-tmult') as HTMLInputElement;
   const curveTmultVal = document.getElementById('curve-tmult-val') as HTMLDivElement;
   const curveSamplesInput = document.getElementById('curve-samples') as HTMLInputElement;
@@ -72,10 +76,14 @@ async function main() {
   thicknessVal.textContent = currentThickness.toFixed(1) + ' px';
   let currentColor = colorSelect.value as ColorMode;
 
-  let curveNormalScale = parseFloat(curveNormalInput.value);
-  curveNormalVal.textContent = curveNormalScale.toFixed(1);
-  let curveTangentScale = parseFloat(curveTangentInput.value);
-  curveTangentVal.textContent = curveTangentScale.toFixed(1);
+  let curveRadius = parseFloat(curveRadiusInput.value);
+  curveRadiusVal.textContent = curveRadius.toFixed(1);
+  let curveOverlap = parseFloat(curveOverlapInput.value);
+  curveOverlapVal.textContent = curveOverlap.toFixed(2) + '×';
+  let curveScaleMul = parseFloat(curveScaleMulInput.value);
+  curveScaleMulVal.textContent = curveScaleMul.toFixed(1) + '×';
+  let curveOpacity = parseFloat(curveOpacityInput.value);
+  curveOpacityVal.textContent = curveOpacity.toFixed(2);
   let curveTangentMultiplier = parseFloat(curveTmultInput.value);
   curveTmultVal.textContent = curveTangentMultiplier.toFixed(1) + '×';
   let curveSamples = parseInt(curveSamplesInput.value);
@@ -120,7 +128,7 @@ async function main() {
     for (const seed of curveSeeds) {
       const params = paramsFromSeed(
         seed, mesh, vertexNormals,
-        curveNormalScale, curveTangentScale, curveSamples, curveTangentMultiplier
+        curveRadius, curveOverlap, curveScaleMul, curveOpacity, curveSamples, curveTangentMultiplier
       );
       curveGaussians.push(...curveToGaussians(params));
     }
@@ -150,7 +158,7 @@ async function main() {
   function generateCurve() {
     const result = generateRandomCurveOnMesh(
       mesh, vertexNormals,
-      curveNormalScale, curveTangentScale, curveSamples, curveTangentMultiplier
+      curveRadius, curveOverlap, curveScaleMul, curveOpacity, curveSamples, curveTangentMultiplier
     );
     curveSeeds.push(result.seed);
     curveGaussians.push(...result.gaussians);
@@ -186,15 +194,27 @@ async function main() {
   });
 
   // Curve param events — regenerate all existing curves with new values
-  curveNormalInput.addEventListener('input', () => {
-    curveNormalScale = parseFloat(curveNormalInput.value);
-    curveNormalVal.textContent = curveNormalScale.toFixed(1);
+  curveRadiusInput.addEventListener('input', () => {
+    curveRadius = parseFloat(curveRadiusInput.value);
+    curveRadiusVal.textContent = curveRadius.toFixed(1);
     if (currentMode === 'curves') regenerateAllCurves();
   });
 
-  curveTangentInput.addEventListener('input', () => {
-    curveTangentScale = parseFloat(curveTangentInput.value);
-    curveTangentVal.textContent = curveTangentScale.toFixed(1);
+  curveOverlapInput.addEventListener('input', () => {
+    curveOverlap = parseFloat(curveOverlapInput.value);
+    curveOverlapVal.textContent = curveOverlap.toFixed(2) + '×';
+    if (currentMode === 'curves') regenerateAllCurves();
+  });
+
+  curveScaleMulInput.addEventListener('input', () => {
+    curveScaleMul = parseFloat(curveScaleMulInput.value);
+    curveScaleMulVal.textContent = curveScaleMul.toFixed(1) + '×';
+    if (currentMode === 'curves') regenerateAllCurves();
+  });
+
+  curveOpacityInput.addEventListener('input', () => {
+    curveOpacity = parseFloat(curveOpacityInput.value);
+    curveOpacityVal.textContent = curveOpacity.toFixed(2);
     if (currentMode === 'curves') regenerateAllCurves();
   });
 

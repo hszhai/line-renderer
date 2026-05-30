@@ -4,6 +4,11 @@ export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
 export type Mat4 = Float32Array; // 16 elements, column-major
 
+/** Maps a "thickness"-style slider value (in pseudo-pixels) to world-space
+ *  sigma. Shared by the wireframe edge and curve generators so both modes
+ *  stay visually consistent. The bunny is ~0.15 units tall. */
+export const WORLD_SCALE = 0.0003;
+
 export function vec3(x = 0, y = 0, z = 0): Vec3 {
   return [x, y, z];
 }

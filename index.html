@@ -40,6 +40,21 @@
       color: #aaa;
       margin-bottom: 4px;
     }
+    .control-group label .hint {
+      color: #666;
+      font-size: 10px;
+    }
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #4fc3f7;
+      margin: 14px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(79, 195, 247, 0.2);
+    }
+    .section-title:first-child { margin-top: 0; }
     .control-group select,
     .control-group input[type="range"] {
       width: 100%;
@@ -103,25 +118,38 @@
 
     <!-- Curve controls -->
     <div id="curve-controls" style="display:none;">
+      <div class="section-title">Gaussian Splat Params</div>
       <div class="control-group">
-        <label>Normal Scale (XY — disc radius)</label>
-        <input type="range" id="curve-normal" min="1" max="20" step="0.5" value="6" />
-        <div class="value-display" id="curve-normal-val">6.0</div>
+        <label>Tube Radius <span class="hint">(perpendicular σ — XY)</span></label>
+        <input type="range" id="curve-radius" min="0.5" max="20" step="0.5" value="4" />
+        <div class="value-display" id="curve-radius-val">4.0</div>
       </div>
       <div class="control-group">
-        <label>Tangent Scale (Z — disc thickness)</label>
-        <input type="range" id="curve-tangent" min="0.5" max="10" step="0.5" value="2" />
-        <div class="value-display" id="curve-tangent-val">2.0</div>
+        <label>Coverage / Overlap <span class="hint">(along-curve σ)</span></label>
+        <input type="range" id="curve-overlap" min="0.5" max="2.5" step="0.05" value="1" />
+        <div class="value-display" id="curve-overlap-val">1.00×</div>
       </div>
       <div class="control-group">
-        <label>Tangent Multiplier</label>
+        <label>Global Scale <span class="hint">(all axes)</span></label>
+        <input type="range" id="curve-scalemul" min="0.2" max="4" step="0.1" value="1" />
+        <div class="value-display" id="curve-scalemul-val">1.0×</div>
+      </div>
+      <div class="control-group">
+        <label>Opacity</label>
+        <input type="range" id="curve-opacity" min="0.05" max="1" step="0.05" value="1" />
+        <div class="value-display" id="curve-opacity-val">1.00</div>
+      </div>
+
+      <div class="section-title">Curve Shape</div>
+      <div class="control-group">
+        <label>Samples <span class="hint">(splats per curve — lower = fewer)</span></label>
+        <input type="range" id="curve-samples" min="3" max="100" step="1" value="16" />
+        <div class="value-display" id="curve-samples-val">16</div>
+      </div>
+      <div class="control-group">
+        <label>Tangent Multiplier <span class="hint">(arc bulge)</span></label>
         <input type="range" id="curve-tmult" min="0.2" max="2" step="0.1" value="0.6" />
         <div class="value-display" id="curve-tmult-val">0.6×</div>
-      </div>
-      <div class="control-group">
-        <label>Curve Samples</label>
-        <input type="range" id="curve-samples" min="10" max="100" step="5" value="40" />
-        <div class="value-display" id="curve-samples-val">40</div>
       </div>
       <div class="control-group">
         <label>Show Bunny Reference</label>

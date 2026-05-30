@@ -1,7 +1,7 @@
 import { Gaussian3D } from './gaussian-generator.ts';
 import { Mesh } from './obj-loader.ts';
-import { computeVertexNormals, pickRandomVertex } from './mesh-utils.ts';
-import { mat3ToQuat, rotateVector, Vec3, v3add, v3cross, v3dot, v3length, v3normalize, v3scale, v3sub } from './math.ts';
+import { pickRandomVertex } from './mesh-utils.ts';
+import { mat3ToQuat, rotateVector, Vec3, v3cross, v3dot, v3length, v3normalize, v3scale, v3sub, WORLD_SCALE } from './math.ts';
 
 // ─────────────────────────────────────────────────────────────
 // Hermite Spline Math
@@ -46,8 +46,10 @@ export interface CurveParams {
   endPoint: Vec3;
   endTangent: Vec3;
   samples: number;
-  normalScale: number;    // XY scale (perpendicular to curve) — the "disc radius"
-  tangentScale: number;   // Z scale (along curve) — the "disc thickness"
+  radius: number;      // perpendicular tube radius (XY sigma, before WORLD_SCALE)
+  overlap: number;     // along-curve coverage: 1.0 = splat spans its segment, >1 overlaps neighbors
+  scaleMul: number;    // global multiplier applied to every axis
+  opacity: number;     // per-splat alpha
   startColor: Vec3;
   endColor: Vec3;
 }
@@ -108,7 +110,7 @@ function computeParallelTransportFrames(points: Vec3[]): { T: Vec3[]; N: Vec3[];
  *  toward the center of curvature) and Y aligned to the binormal.
  */
 export function curveToGaussians(params: CurveParams): Gaussian3D[] {
-  const { startPoint, startTangent, endPoint, endTangent, samples, normalScale, tangentScale, startColor, endColor } = params;
+  const { startPoint, startTangent, endPoint, endTangent, samples, radius, overlap, scaleMul, opacity, startColor, endColor } = params;
   const gaussians: Gaussian3D[] = [];
 
   const points: Vec3[] = [];
@@ -117,9 +119,9 @@ export function curveToGaussians(params: CurveParams): Gaussian3D[] {
   }
 
   const frames = computeParallelTransportFrames(points);
-  const sx = normalScale * 0.0003;   // scale in N direction (curve normal)
-  const sy = normalScale * 0.0003;   // scale in B direction (binormal)
-  const sz = tangentScale * 0.0003;  // scale in T direction (along curve)
+  // Perpendicular sigma (tube radius) is constant along the curve.
+  const sx = radius * WORLD_SCALE * scaleMul;   // scale in N direction (curve normal)
+  const sy = radius * WORLD_SCALE * scaleMul;   // scale in B direction (binormal)
 
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
@@ -127,6 +129,11 @@ export function curveToGaussians(params: CurveParams): Gaussian3D[] {
 
     const segLen = v3length(v3sub(b, a));
     if (segLen < 1e-8) continue;
+
+    // Along-curve sigma stretches the splat to span its own segment, so a
+    // single splat covers the gap between samples. `overlap` blends neighbors
+    // (1.0 ≈ meet at ~0.6 alpha each). The +sx term gives a rounded cap.
+    const sz = (segLen * 0.5) * overlap + sx;
 
     const mid: Vec3 = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5];
 
@@ -150,7 +157,7 @@ export function curveToGaussians(params: CurveParams): Gaussian3D[] {
       scale: [sx, sy, sz],
       rotation: [rot[0], rot[1], rot[2], rot[3]],
       color,
-      opacity: 1.0,
+      opacity,
     });
   }
 
@@ -185,13 +192,13 @@ export function hsvToRgb(h: number, s: number, v: number): Vec3 {
 export function generateRandomCurveOnMesh(
   mesh: Mesh,
   vertexNormals: Float32Array,
-  normalScale = 6,
-  tangentScale = 2,
+  radius = 6,
+  overlap = 1.0,
+  scaleMul = 1.0,
+  opacity = 1.0,
   samples = 40,
   tangentMultiplier = 0.6
 ): { gaussians: Gaussian3D[]; seed: CurveSeed } {
-  const numVerts = mesh.vertices.length / 3;
-
   const start = pickRandomVertex(mesh, vertexNormals);
   let end = pickRandomVertex(mesh, vertexNormals);
   let attempts = 0;
@@ -215,8 +222,10 @@ export function generateRandomCurveOnMesh(
     endPoint: end.position,
     endTangent,
     samples,
-    normalScale,
-    tangentScale,
+    radius,
+    overlap,
+    scaleMul,
+    opacity,
     startColor: hsvToRgb(hueStart, 0.85, 1.0),
     endColor: hsvToRgb(hueEnd, 0.85, 1.0),
   };
@@ -232,8 +241,10 @@ export function paramsFromSeed(
   seed: CurveSeed,
   mesh: Mesh,
   vertexNormals: Float32Array,
-  normalScale: number,
-  tangentScale: number,
+  radius: number,
+  overlap: number,
+  scaleMul: number,
+  opacity: number,
   samples: number,
   tangentMultiplier: number
 ): CurveParams {
@@ -253,8 +264,10 @@ export function paramsFromSeed(
     endPoint: endPos,
     endTangent: v3scale(endNorm, -scale),
     samples,
-    normalScale,
-    tangentScale,
+    radius,
+    overlap,
+    scaleMul,
+    opacity,
     startColor: hsvToRgb(seed.hueStart, 0.85, 1.0),
     endColor: hsvToRgb(seed.hueEnd, 0.85, 1.0),
   };
