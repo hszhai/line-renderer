@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3DGS Line Renderer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #controls {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(20, 20, 20, 0.85);
+      padding: 16px 20px;
+      border-radius: 8px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      min-width: 220px;
+    }
+    #controls h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #4fc3f7;
+      letter-spacing: 0.5px;
+    }
+    .control-group {
+      margin-bottom: 12px;
+    }
+    .control-group label {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
+    .control-group select,
+    .control-group input[type="range"] {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .control-group input[type="range"] {
+      padding: 0;
+    }
+    .value-display {
+      font-size: 11px;
+      color: #888;
+      text-align: right;
+      margin-top: 2px;
+    }
+    .info {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 11px;
+      color: #888;
+      line-height: 1.5;
+    }
+    .info span { color: #ccc; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="controls">
+    <h1>3DGS Line Renderer</h1>
+    <div class="control-group">
+      <label>Render Mode</label>
+      <select id="mode">
+        <option value="wireframe">Wireframe (All Edges)</option>
+        <option value="silhouette">Silhouette / Outline</option>
+        <option value="curves">Generative Curves</option>
+      </select>
+    </div>
+
+    <!-- Mesh controls -->
+    <div id="mesh-controls">
+      <div class="control-group">
+        <label>Line Thickness</label>
+        <input type="range" id="thickness" min="0.5" max="12" step="0.5" value="3" />
+        <div class="value-display" id="thickness-val">3.0 px</div>
+      </div>
+      <div class="control-group">
+        <label>Line Color</label>
+        <select id="color">
+          <option value="white">White</option>
+          <option value="cyan">Cyan</option>
+          <option value="orange">Orange</option>
+          <option value="rainbow">Rainbow (by normal)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Curve controls -->
+    <div id="curve-controls" style="display:none;">
+      <div class="control-group">
+        <label>Normal Scale (XY — disc radius)</label>
+        <input type="range" id="curve-normal" min="1" max="20" step="0.5" value="6" />
+        <div class="value-display" id="curve-normal-val">6.0</div>
+      </div>
+      <div class="control-group">
+        <label>Tangent Scale (Z — disc thickness)</label>
+        <input type="range" id="curve-tangent" min="0.5" max="10" step="0.5" value="2" />
+        <div class="value-display" id="curve-tangent-val">2.0</div>
+      </div>
+      <div class="control-group">
+        <label>Tangent Multiplier</label>
+        <input type="range" id="curve-tmult" min="0.2" max="2" step="0.1" value="0.6" />
+        <div class="value-display" id="curve-tmult-val">0.6×</div>
+      </div>
+      <div class="control-group">
+        <label>Curve Samples</label>
+        <input type="range" id="curve-samples" min="10" max="100" step="5" value="40" />
+        <div class="value-display" id="curve-samples-val">40</div>
+      </div>
+      <div class="control-group">
+        <label>Show Bunny Reference</label>
+        <input type="checkbox" id="show-reference" checked />
+      </div>
+      <div class="control-group" style="display:flex;gap:8px;">
+        <button id="gen-curve" style="flex:1;background:#222;border:1px solid #444;color:#fff;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Generate Curve</button>
+        <button id="clear-curves" style="flex:1;background:#222;border:1px solid #444;color:#fff;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Clear</button>
+      </div>
+    </div>
+
+    <div class="info">
+      <span>Model:</span> Stanford Bunny<br>
+      <span id="mesh-info"><span>Edges:</span> <span id="edge-count">-</span><br></span>
+      <span id="curve-info" style="display:none;"><span>Curves:</span> <span id="curve-count">0</span> &nbsp;|&nbsp; <span>Segs:</span> <span id="seg-count">0</span><br></span>
+      <span>Controls:</span> Left-drag to rotate, scroll to zoom
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
