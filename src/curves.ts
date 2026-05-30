@@ -111,12 +111,30 @@ function computeParallelTransportFrames(points: Vec3[]): { T: Vec3[]; N: Vec3[];
  */
 export function curveToGaussians(params: CurveParams): Gaussian3D[] {
   const { startPoint, startTangent, endPoint, endTangent, samples, radius, overlap, scaleMul, opacity, startColor, endColor } = params;
-  const gaussians: Gaussian3D[] = [];
 
   const points: Vec3[] = [];
   for (let i = 0; i <= samples; i++) {
     points.push(hermitePoint(i / samples, startPoint, startTangent, endPoint, endTangent));
   }
+
+  return pointsToGaussians(points, radius, overlap, scaleMul, opacity, startColor, endColor);
+}
+
+/** Lay a tube of Gaussians along an arbitrary point polyline. Each segment
+ *  becomes one splat: thin (`radius`) on the curve's normal/binormal and
+ *  stretched along the tangent, oriented by a Parallel Transport Frame so the
+ *  tube doesn't twist. Shared by Hermite curves and surface walks. */
+export function pointsToGaussians(
+  points: Vec3[],
+  radius: number,
+  overlap: number,
+  scaleMul: number,
+  opacity: number,
+  startColor: Vec3,
+  endColor: Vec3
+): Gaussian3D[] {
+  const gaussians: Gaussian3D[] = [];
+  if (points.length < 2) return gaussians;
 
   const frames = computeParallelTransportFrames(points);
   // Perpendicular sigma (tube radius) is constant along the curve.

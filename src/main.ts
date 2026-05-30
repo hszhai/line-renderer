@@ -5,6 +5,7 @@ import { edgesToGaussians, ColorMode, Gaussian3D } from './gaussian-generator.ts
 import { loadOBJ, Mesh } from './obj-loader.ts';
 import { computeVertexNormals } from './mesh-utils.ts';
 import { GaussianSplatRenderer } from './renderer.ts';
+import { buildVertexAdjacency, generateSurfaceWalk, walkSeedToGaussians, WalkSeed } from './surface-walk.ts';
 
 type RenderMode = 'wireframe' | 'silhouette' | 'curves';
 
@@ -36,6 +37,7 @@ async function main() {
 
   const allEdges = extractAllEdges(mesh);
   const vertexNormals = computeVertexNormals(mesh);
+  const vertexAdjacency = buildVertexAdjacency(mesh);
   console.log(`Unique edges: ${allEdges.length}`);
 
   // ─── UI refs ───
@@ -63,6 +65,11 @@ async function main() {
   const curveSamplesInput = document.getElementById('curve-samples') as HTMLInputElement;
   const curveSamplesVal = document.getElementById('curve-samples-val') as HTMLDivElement;
   const showReferenceCheck = document.getElementById('show-reference') as HTMLInputElement;
+  const walkStepsInput = document.getElementById('walk-steps') as HTMLInputElement;
+  const walkStepsVal = document.getElementById('walk-steps-val') as HTMLDivElement;
+  const walkWanderInput = document.getElementById('walk-wander') as HTMLInputElement;
+  const walkWanderVal = document.getElementById('walk-wander-val') as HTMLDivElement;
+  const genWalkBtn = document.getElementById('gen-walk') as HTMLButtonElement;
   const genCurveBtn = document.getElementById('gen-curve') as HTMLButtonElement;
   const clearCurvesBtn = document.getElementById('clear-curves') as HTMLButtonElement;
   const curveCountDisplay = document.getElementById('curve-count') as HTMLSpanElement;
@@ -90,7 +97,13 @@ async function main() {
   curveSamplesVal.textContent = String(curveSamples);
   let showReference = showReferenceCheck.checked;
 
+  let walkSteps = parseInt(walkStepsInput.value);
+  walkStepsVal.textContent = String(walkSteps);
+  let walkWander = parseFloat(walkWanderInput.value);
+  walkWanderVal.textContent = walkWander.toFixed(2);
+
   let curveSeeds: CurveSeed[] = [];
+  let walkSeeds: WalkSeed[] = [];
   let curveGaussians: Gaussian3D[] = [];
   let meshRefGaussians: Gaussian3D[] = [];
 
@@ -132,6 +145,12 @@ async function main() {
       );
       curveGaussians.push(...curveToGaussians(params));
     }
+    for (const seed of walkSeeds) {
+      curveGaussians.push(...walkSeedToGaussians(
+        seed, mesh, vertexAdjacency,
+        curveRadius, curveOverlap, curveScaleMul, curveOpacity, walkSteps, walkWander
+      ));
+    }
     regenerateGaussians();
   }
 
@@ -150,7 +169,7 @@ async function main() {
         all = all.concat(meshRefGaussians);
       }
       renderer.setGaussians(all);
-      curveCountDisplay.textContent = String(curveSeeds.length);
+      curveCountDisplay.textContent = String(curveSeeds.length + walkSeeds.length);
       segCountDisplay.textContent = String(curveGaussians.length);
     }
   }
@@ -165,8 +184,18 @@ async function main() {
     regenerateGaussians();
   }
 
+  function generateWalk() {
+    const result = generateSurfaceWalk(
+      mesh, vertexAdjacency,
+      curveRadius, curveOverlap, curveScaleMul, curveOpacity, walkSteps, walkWander
+    );
+    walkSeeds.push(result.seed);
+    regenerateAllCurves();
+  }
+
   function clearCurves() {
     curveSeeds = [];
+    walkSeeds = [];
     curveGaussians = [];
     regenerateGaussians();
   }
@@ -235,6 +264,19 @@ async function main() {
     regenerateGaussians();
   });
 
+  walkStepsInput.addEventListener('input', () => {
+    walkSteps = parseInt(walkStepsInput.value);
+    walkStepsVal.textContent = String(walkSteps);
+    if (currentMode === 'curves') regenerateAllCurves();
+  });
+
+  walkWanderInput.addEventListener('input', () => {
+    walkWander = parseFloat(walkWanderInput.value);
+    walkWanderVal.textContent = walkWander.toFixed(2);
+    if (currentMode === 'curves') regenerateAllCurves();
+  });
+
+  genWalkBtn.addEventListener('click', generateWalk);
   genCurveBtn.addEventListener('click', generateCurve);
   clearCurvesBtn.addEventListener('click', clearCurves);
 
