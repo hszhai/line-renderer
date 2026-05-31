@@ -13,8 +13,11 @@ import {
 import { ContourAxis, contoursToGaussians } from './contours.ts';
 import { flowFieldToGaussians } from './flow-field.ts';
 import { ProfileEditor } from './profile-editor.ts';
+import { randomPointsBetween, splineThroughPoints } from './spline.ts';
+import { pointsToGaussians } from './curves.ts';
+import { createRng } from './surface-walk.ts';
 
-type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours' | 'flow';
+type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours' | 'flow' | 'spline';
 
 // Canonical size every model is normalized to, so the splat sizing, camera, and
 // noise scales stay calibrated regardless of the source model's units.
@@ -81,6 +84,7 @@ async function main() {
   const modelingControls = document.getElementById('modeling-controls') as HTMLDivElement;
   const contourControls = document.getElementById('contour-controls') as HTMLDivElement;
   const flowControls = document.getElementById('flow-controls') as HTMLDivElement;
+  const splineControls = document.getElementById('spline-controls') as HTMLDivElement;
   const splatControls = document.getElementById('splat-controls') as HTMLDivElement;
   const walkParams = document.getElementById('walk-params') as HTMLDivElement;
   const curveParams = document.getElementById('curve-params') as HTMLDivElement;
@@ -103,6 +107,7 @@ async function main() {
   const ctAxisSelect = document.getElementById('ct-axis') as HTMLSelectElement;
   const showReferenceCheck = document.getElementById('show-reference') as HTMLInputElement;
   const genClusterBtn = document.getElementById('gen-cluster') as HTMLButtonElement;
+  const genSplineBtn = document.getElementById('gen-spline') as HTMLButtonElement;
   const clearBtn = document.getElementById('clear-curves') as HTMLButtonElement;
 
   // ─── State ───
@@ -124,6 +129,15 @@ async function main() {
   let ffWander = 0.08;
   let ffSmoothing = 2;
   let ffVariant = 0;
+
+  // Spline params
+  let splinePoints = 6;
+  let splineSpread = 0.35;
+  let splineTension = 0;
+  let splineBias = 0;
+  let splineContinuity = 0;
+  let splineSamples = 24;
+  let splineVariant = 1;
 
   // Interactive width-profile editor; sampled per-segment along each stroke.
   const profileEditor = new ProfileEditor(profileCanvas, () => regenerate());
@@ -232,6 +246,26 @@ async function main() {
       renderer.setGaussians(gaussians);
       clusterCountDisplay.textContent = String(Math.round(ffDensity));
       splatCountDisplay.textContent = String(gaussians.length);
+    } else if (currentMode === 'spline') {
+      // Random start/end in a box around the model, interior points off the line.
+      const rng = createRng((Math.round(splineVariant) * 2654435761) >>> 0);
+      const box = MODEL_SIZE * 0.6;
+      const rp = (): number => (rng() * 2 - 1) * box;
+      const start: [number, number, number] = [rp(), rp(), rp()];
+      const end: [number, number, number] = [rp(), rp(), rp()];
+      const ctrl = randomPointsBetween(start, end, splinePoints, splineSpread, rng);
+      const curve = splineThroughPoints(ctrl, {
+        tension: splineTension, bias: splineBias, continuity: splineContinuity,
+        samplesPerSegment: splineSamples,
+      });
+      // Colour ramps A→B along the curve; the profile envelopes its width.
+      const gaussians = pointsToGaussians(
+        curve, style.radius, style.overlap, style.scaleMul, style.opacity,
+        style.colorA, style.colorB, style.profile
+      );
+      renderer.setGaussians(gaussians);
+      clusterCountDisplay.textContent = String(splinePoints);
+      splatCountDisplay.textContent = String(gaussians.length);
     } else {
       let all: Gaussian3D[] = [];
       for (const seed of clusterSeeds) {
@@ -252,12 +286,14 @@ async function main() {
     const modeling = currentMode === 'modeling';
     const contours = currentMode === 'contours';
     const flow = currentMode === 'flow';
+    const spline = currentMode === 'spline';
     const meshMode = currentMode === 'wireframe' || currentMode === 'silhouette';
-    const splat = modeling || contours || flow;
+    const splat = modeling || contours || flow || spline;
     meshControls.style.display = meshMode ? 'block' : 'none';
     modelingControls.style.display = modeling ? 'block' : 'none';
     contourControls.style.display = contours ? 'block' : 'none';
     flowControls.style.display = flow ? 'block' : 'none';
+    splineControls.style.display = spline ? 'block' : 'none';
     splatControls.style.display = splat ? 'block' : 'none';
     meshInfo.style.display = meshMode ? 'inline' : 'none';
     curveInfo.style.display = meshMode ? 'none' : 'inline';
@@ -306,6 +342,13 @@ async function main() {
   // Colour jitter
   bindRange('c-hue-jitter', (v) => (style.hueJitter = v), (v) => v.toFixed(2));
   bindRange('c-bright-jitter', (v) => (style.brightJitter = v), (v) => v.toFixed(2));
+  // Spline
+  bindRange('sp-points', (v) => (splinePoints = v), (v) => String(Math.round(v)));
+  bindRange('sp-spread', (v) => (splineSpread = v), (v) => v.toFixed(2));
+  bindRange('sp-tension', (v) => (splineTension = v), (v) => v.toFixed(2));
+  bindRange('sp-bias', (v) => (splineBias = v), (v) => v.toFixed(2));
+  bindRange('sp-continuity', (v) => (splineContinuity = v), (v) => v.toFixed(2));
+  bindRange('sp-samples', (v) => (splineSamples = v), (v) => String(Math.round(v)));
   // Contours
   bindRange('ct-levels', (v) => (contourLevels = v), (v) => String(Math.round(v)));
   // Flow field
@@ -374,6 +417,11 @@ async function main() {
 
   genClusterBtn.addEventListener('click', () => {
     clusterSeeds.push(createClusterSeed(mesh, strandType, strategy));
+    regenerate();
+  });
+
+  genSplineBtn.addEventListener('click', () => {
+    splineVariant = Math.floor(Math.random() * 100000);
     regenerate();
   });
 
