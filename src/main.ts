@@ -14,7 +14,7 @@ import { ContourAxis, contoursToGaussians } from './contours.ts';
 import { flowFieldToGaussians } from './flow-field.ts';
 import { ProfileEditor } from './profile-editor.ts';
 import { randomPointsBetween, splineThroughPoints } from './spline.ts';
-import { pointsToGaussians } from './curves.ts';
+import { offsetCurve, pointsToGaussians } from './curves.ts';
 import { createRng } from './surface-walk.ts';
 
 type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours' | 'flow' | 'spline';
@@ -138,6 +138,8 @@ async function main() {
   let splineContinuity = 0;
   let splineSamples = 24;
   let splineVariant = 1;
+  let splineOffset = 0;       // companion-curve distance (0 = none)
+  let splineOffsetAngle = 0;  // direction around the tangent (degrees)
 
   // Interactive width-profile editor; sampled per-segment along each stroke.
   const profileEditor = new ProfileEditor(profileCanvas, () => regenerate());
@@ -259,10 +261,15 @@ async function main() {
         samplesPerSegment: splineSamples,
       });
       // Colour ramps A→B along the curve; the profile envelopes its width.
-      const gaussians = pointsToGaussians(
-        curve, style.radius, style.overlap, style.scaleMul, style.opacity,
+      const tube = (pts: [number, number, number][]) => pointsToGaussians(
+        pts, style.radius, style.overlap, style.scaleMul, style.opacity,
         style.colorA, style.colorB, style.profile
       );
+      let gaussians = tube(curve);
+      // Optional companion curve, offset via the parallel-transport frame.
+      if (splineOffset > 1e-6) {
+        gaussians = gaussians.concat(tube(offsetCurve(curve, splineOffset, splineOffsetAngle)));
+      }
       renderer.setGaussians(gaussians);
       clusterCountDisplay.textContent = String(splinePoints);
       splatCountDisplay.textContent = String(gaussians.length);
@@ -349,6 +356,8 @@ async function main() {
   bindRange('sp-bias', (v) => (splineBias = v), (v) => v.toFixed(2));
   bindRange('sp-continuity', (v) => (splineContinuity = v), (v) => v.toFixed(2));
   bindRange('sp-samples', (v) => (splineSamples = v), (v) => String(Math.round(v)));
+  bindRange('sp-offset', (v) => (splineOffset = v), (v) => v.toFixed(3));
+  bindRange('sp-offset-angle', (v) => (splineOffsetAngle = v), (v) => Math.round(v) + '°');
   // Contours
   bindRange('ct-levels', (v) => (contourLevels = v), (v) => String(Math.round(v)));
   // Flow field
