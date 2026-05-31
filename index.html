@@ -139,6 +139,35 @@
       font-size: 12px;
     }
     .btn-accent { background: #3a2b4b; border-color: #6f4a8f; color: #d9bff5; }
+    .note { font-size: 10px; color: #777; line-height: 1.4; }
+    .color-strip {
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      margin-top: 6px;
+    }
+    .profile-canvas {
+      width: 100%;
+      height: 90px;
+      display: block;
+      background: #161616;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: crosshair;
+      margin-top: 2px;
+    }
+    .preset-row { display: flex; gap: 4px; margin-top: 6px; }
+    .btn-mini {
+      flex: 1;
+      background: #222;
+      border: 1px solid #444;
+      color: #ccc;
+      padding: 3px 2px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .btn-mini:hover { background: #333; }
   </style>
 </head>
 <body>
@@ -152,6 +181,7 @@
         <option value="silhouette">Silhouette / Outline</option>
         <option value="modeling">Modeling (Clusters)</option>
         <option value="contours">Contours (Iso-lines)</option>
+        <option value="flow">Flow Field (Whole Model)</option>
       </select>
     </div>
 
@@ -159,6 +189,14 @@
     <div class="panel">
       <div class="panel-header">Scene <span class="chev">▾</span></div>
       <div class="panel-body">
+        <div class="control-group">
+          <label>Model</label>
+          <select id="model-select" title="Model">
+            <option value="stanford_bunny.obj">Stanford Bunny</option>
+            <option value="max-planck.obj">Max Planck</option>
+            <option value="igea.obj">Igea</option>
+          </select>
+        </div>
         <div class="control-group">
           <label>Background Color</label>
           <input type="color" id="bg-color" value="#0a0a0a" />
@@ -302,16 +340,55 @@
               <div class="value-display" id="ct-levels-val">24</div>
             </div>
           </div>
+          <div class="note">Colour ramps Color A → Color B up the stack (Color panel).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flow Field Tool (flow mode) -->
+    <div id="flow-controls" style="display:none;">
+      <div class="panel">
+        <div class="panel-header">Flow Field Tool <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="row">
+            <div class="control-group">
+              <label>Density <span class="hint">(strands)</span></label>
+              <input type="range" id="ff-density" min="20" max="1200" step="10" value="200" />
+              <div class="value-display" id="ff-density-val">200</div>
+            </div>
+            <div class="control-group">
+              <label>Length <span class="hint">(steps)</span></label>
+              <input type="range" id="ff-steps" min="3" max="200" step="1" value="40" />
+              <div class="value-display" id="ff-steps-val">40</div>
+            </div>
+          </div>
           <div class="control-group">
-            <label>Color Spread <span class="hint">(hue across levels — topographic)</span></label>
-            <input type="range" id="ct-huerange" min="0" max="1" step="0.02" value="0" />
-            <div class="value-display" id="ct-huerange-val">0.00</div>
+            <label>Noise Scale <span class="hint">(field frequency)</span></label>
+            <input type="range" id="ff-noise" min="5" max="120" step="1" value="35" />
+            <div class="value-display" id="ff-noise-val">35</div>
+          </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Wander</label>
+              <input type="range" id="ff-wander" min="0" max="1" step="0.01" value="0.08" />
+              <div class="value-display" id="ff-wander-val">0.08</div>
+            </div>
+            <div class="control-group">
+              <label>Smoothness</label>
+              <input type="range" id="ff-smooth" min="0" max="4" step="1" value="2" />
+              <div class="value-display" id="ff-smooth-val">2</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Variant <span class="hint">(new field / seeds)</span></label>
+            <input type="range" id="ff-variant" min="0" max="60" step="1" value="0" />
+            <div class="value-display" id="ff-variant-val">0</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Splat & Colour (modeling OR contours) -->
+    <!-- Splat & Colour (modeling OR contours OR flow) -->
     <div id="splat-controls" style="display:none;">
 
       <!-- Gaussian & Render -->
@@ -333,10 +410,28 @@
             <input type="range" id="g-scale" min="0.2" max="4" step="0.1" value="1" />
             <div class="value-display" id="g-scale-val">1.0×</div>
           </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Opacity A</label>
+              <input type="range" id="g-opacity" min="0.05" max="1" step="0.05" value="1" />
+              <div class="value-display" id="g-opacity-val">1.00</div>
+            </div>
+            <div class="control-group">
+              <label>Opacity B <span class="hint">(gradient end)</span></label>
+              <input type="range" id="g-opacity-b" min="0.05" max="1" step="0.05" value="1" />
+              <div class="value-display" id="g-opacity-b-val">1.00</div>
+            </div>
+          </div>
           <div class="control-group">
-            <label>Opacity</label>
-            <input type="range" id="g-opacity" min="0.05" max="1" step="0.05" value="1" />
-            <div class="value-display" id="g-opacity-val">1.00</div>
+            <label>Width Profile <span class="hint">(along stroke · click add · drag · dbl-click remove)</span></label>
+            <canvas id="profile-canvas" class="profile-canvas"></canvas>
+            <div class="preset-row">
+              <button class="btn-mini" data-preset="uniform">Uniform</button>
+              <button class="btn-mini" data-preset="taper">Taper</button>
+              <button class="btn-mini" data-preset="grow">Grow</button>
+              <button class="btn-mini" data-preset="shrink">Shrink</button>
+              <button class="btn-mini" data-preset="calligraphic">Callig.</button>
+            </div>
           </div>
           <div class="row">
             <div class="control-group">
@@ -357,10 +452,17 @@
       <div class="panel">
         <div class="panel-header">Color <span class="chev">▾</span></div>
         <div class="panel-body">
-          <div class="control-group">
-            <label>Base Color</label>
-            <input type="color" id="c-base" value="#4fc3f7" />
+          <div class="row">
+            <div class="control-group">
+              <label>Color A</label>
+              <input type="color" id="c-a" value="#4fc3f7" />
+            </div>
+            <div class="control-group">
+              <label>Color B <span class="hint">(gradient end)</span></label>
+              <input type="color" id="c-b" value="#f06292" />
+            </div>
           </div>
+          <div id="color-strip" class="color-strip"></div>
           <div class="row">
             <div class="control-group">
               <label>Hue Jitter</label>

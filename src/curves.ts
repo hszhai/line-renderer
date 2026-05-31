@@ -99,7 +99,7 @@ function computeParallelTransportFrames(points: Vec3[]): { T: Vec3[]; N: Vec3[];
  *  with its local X axis aligned to the curve's normal (pointing
  *  toward the center of curvature) and Y aligned to the binormal.
  */
-export function curveToGaussians(params: CurveParams): Gaussian3D[] {
+export function curveToGaussians(params: CurveParams, profile?: (t: number) => number): Gaussian3D[] {
   const { startPoint, startTangent, endPoint, endTangent, samples, radius, overlap, scaleMul, opacity, startColor, endColor } = params;
 
   const points: Vec3[] = [];
@@ -107,7 +107,7 @@ export function curveToGaussians(params: CurveParams): Gaussian3D[] {
     points.push(hermitePoint(i / samples, startPoint, startTangent, endPoint, endTangent));
   }
 
-  return pointsToGaussians(points, radius, overlap, scaleMul, opacity, startColor, endColor);
+  return pointsToGaussians(points, radius, overlap, scaleMul, opacity, startColor, endColor, profile);
 }
 
 /** Lay a tube of Gaussians along an arbitrary point polyline. Each segment
@@ -121,15 +121,15 @@ export function pointsToGaussians(
   scaleMul: number,
   opacity: number,
   startColor: Vec3,
-  endColor: Vec3
+  endColor: Vec3,
+  profile?: (t: number) => number  // along-strand width multiplier, t ∈ [0,1]
 ): Gaussian3D[] {
   const gaussians: Gaussian3D[] = [];
   if (points.length < 2) return gaussians;
 
   const frames = computeParallelTransportFrames(points);
-  // Perpendicular sigma (tube radius) is constant along the curve.
-  const sx = radius * WORLD_SCALE * scaleMul;   // scale in N direction (curve normal)
-  const sy = radius * WORLD_SCALE * scaleMul;   // scale in B direction (binormal)
+  // Base perpendicular sigma (tube radius); a profile can modulate it per segment.
+  const baseSigma = radius * WORLD_SCALE * scaleMul;
 
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
@@ -138,10 +138,15 @@ export function pointsToGaussians(
     const segLen = v3length(v3sub(b, a));
     if (segLen < 1e-8) continue;
 
+    const t = (i + 0.5) / (points.length - 1);
+
+    // Perpendicular sigma, optionally shaped along the strand (e.g. tapered).
+    const sigma = profile ? baseSigma * profile(t) : baseSigma;
+
     // Along-curve sigma stretches the splat to span its own segment, so a
     // single splat covers the gap between samples. `overlap` blends neighbors
-    // (1.0 ≈ meet at ~0.6 alpha each). The +sx term gives a rounded cap.
-    const sz = (segLen * 0.5) * overlap + sx;
+    // (1.0 ≈ meet at ~0.6 alpha each). The +sigma term gives a rounded cap.
+    const sz = (segLen * 0.5) * overlap + sigma;
 
     const mid: Vec3 = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5];
 
@@ -153,7 +158,6 @@ export function pointsToGaussians(
     ]);
     const rot = mat3ToQuat(rotMat);
 
-    const t = (i + 0.5) / (points.length - 1);
     const color: Vec3 = [
       startColor[0] + (endColor[0] - startColor[0]) * t,
       startColor[1] + (endColor[1] - startColor[1]) * t,
@@ -162,7 +166,7 @@ export function pointsToGaussians(
 
     gaussians.push({
       position: mid,
-      scale: [sx, sy, sz],
+      scale: [sigma, sigma, sz],
       rotation: [rot[0], rot[1], rot[2], rot[3]],
       color,
       opacity,
@@ -227,4 +231,19 @@ export function rgbToHsv(c: Vec3): [number, number, number] {
     if (h < 0) h += 1;
   }
   return [h, max <= 0 ? 0 : d / max, max];
+}
+
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/** Linear RGB interpolation between two colours. */
+export function lerpColor(a: Vec3, b: Vec3, t: number): Vec3 {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+/** Jitter a colour in HSV: hue by ±hueJitter, value (brightness) by ±brightJitter. */
+export function jitterColor(c: Vec3, hueJitter: number, brightJitter: number, rng: () => number): Vec3 {
+  const [h, s, v] = rgbToHsv(c);
+  const nh = (h + (rng() * 2 - 1) * hueJitter * 0.5 + 1) % 1;
+  const nv = clamp01(v * (1 + (rng() * 2 - 1) * brightJitter));
+  return hsvToRgb(nh, s, nv);
 }
