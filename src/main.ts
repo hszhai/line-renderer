@@ -2,6 +2,7 @@ import { OrbitCamera } from './camera.ts';
 import { extractAllEdges, extractSilhouetteEdges } from './edge-extractor.ts';
 import { edgesToGaussians, ColorMode, Gaussian3D } from './gaussian-generator.ts';
 import { loadOBJ, Mesh } from './obj-loader.ts';
+import { loadPLY } from './ply-loader.ts';
 import { computePrincipalDirections, computeVertexNormals, decimateMesh } from './mesh-utils.ts';
 import { GaussianSplatRenderer } from './renderer.ts';
 import { buildVertexAdjacency } from './surface-walk.ts';
@@ -157,7 +158,8 @@ async function main() {
 
   // Load (or switch) the model: normalize it, recompute derived data, reframe.
   async function loadModel(file: string) {
-    mesh = await loadOBJ('/models/' + file);
+    const url = '/models/' + file;
+    mesh = file.toLowerCase().endsWith('.ply') ? await loadPLY(url) : await loadOBJ(url);
     normalizeMesh(mesh, MODEL_SIZE);
     const before = mesh.vertices.length / 3;
     mesh = decimateMesh(mesh, MAX_VERTS);
