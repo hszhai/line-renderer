@@ -1,7 +1,5 @@
 import { Gaussian3D } from './gaussian-generator.ts';
-import { Mesh } from './obj-loader.ts';
-import { pickRandomVertex } from './mesh-utils.ts';
-import { mat3ToQuat, rotateVector, Vec3, v3cross, v3dot, v3length, v3normalize, v3scale, v3sub, WORLD_SCALE } from './math.ts';
+import { mat3ToQuat, rotateVector, Vec3, v3cross, v3dot, v3length, v3normalize, v3sub, WORLD_SCALE } from './math.ts';
 
 // ─────────────────────────────────────────────────────────────
 // Hermite Spline Math
@@ -52,14 +50,6 @@ export interface CurveParams {
   opacity: number;     // per-splat alpha
   startColor: Vec3;
   endColor: Vec3;
-}
-
-/** Persistent seed so curves can be regenerated with new param values. */
-export interface CurveSeed {
-  startIdx: number;
-  endIdx: number;
-  hueStart: number;
-  hueEnd: number;
 }
 
 /** Compute a Parallel Transport Frame along a sampled curve.
@@ -182,6 +172,26 @@ export function pointsToGaussians(
   return gaussians;
 }
 
+/** Chaikin corner-cutting: smooth a polyline by replacing each segment with
+ *  points at its 1/4 and 3/4 marks, repeated `iterations` times. Endpoints are
+ *  kept. This pulls a jagged vertex path off its sharp corners into a smooth,
+ *  flowing curve (and onto sub-vertex positions between the original points). */
+export function smoothPolyline(points: Vec3[], iterations: number): Vec3[] {
+  let pts = points;
+  for (let it = 0; it < iterations; it++) {
+    if (pts.length < 3) break;
+    const out: Vec3[] = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25, a[2] * 0.75 + b[2] * 0.25]);
+      out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75, a[2] * 0.25 + b[2] * 0.75]);
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  return pts;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Generative helpers
 // ─────────────────────────────────────────────────────────────
@@ -204,89 +214,17 @@ export function hsvToRgb(h: number, s: number, v: number): Vec3 {
   return [v, v, v];
 }
 
-/** Generate a random curve seed + Gaussians.
- *  The end-point normal is NEGATED so the curve approaches the surface
- *  from the outside (both endpoints grow outward). */
-export function generateRandomCurveOnMesh(
-  mesh: Mesh,
-  vertexNormals: Float32Array,
-  radius = 6,
-  overlap = 1.0,
-  scaleMul = 1.0,
-  opacity = 1.0,
-  samples = 40,
-  tangentMultiplier = 0.6
-): { gaussians: Gaussian3D[]; seed: CurveSeed } {
-  const start = pickRandomVertex(mesh, vertexNormals);
-  let end = pickRandomVertex(mesh, vertexNormals);
-  let attempts = 0;
-  while (end.index === start.index && attempts++ < 10) {
-    end = pickRandomVertex(mesh, vertexNormals);
+/** Convert RGB → HSV. All channels in [0,1]. */
+export function rgbToHsv(c: Vec3): [number, number, number] {
+  const r = c[0], g = c[1], b = c[2];
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 1e-6) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+    if (h < 0) h += 1;
   }
-
-  const dist = v3length(v3sub(end.position, start.position));
-  const scale = Math.max(0.05, dist * tangentMultiplier);
-
-  // Start grows outward; end approaches from outside → negate its normal
-  const startTangent = v3scale(start.normal, scale);
-  const endTangent = v3scale(end.normal, -scale);
-
-  const hueStart = Math.random();
-  const hueEnd = (hueStart + 0.25 + Math.random() * 0.3) % 1.0;
-
-  const params: CurveParams = {
-    startPoint: start.position,
-    startTangent,
-    endPoint: end.position,
-    endTangent,
-    samples,
-    radius,
-    overlap,
-    scaleMul,
-    opacity,
-    startColor: hsvToRgb(hueStart, 0.85, 1.0),
-    endColor: hsvToRgb(hueEnd, 0.85, 1.0),
-  };
-
-  return {
-    gaussians: curveToGaussians(params),
-    seed: { startIdx: start.index, endIdx: end.index, hueStart, hueEnd },
-  };
-}
-
-/** Rebuild a CurveParams from a seed + current global settings. */
-export function paramsFromSeed(
-  seed: CurveSeed,
-  mesh: Mesh,
-  vertexNormals: Float32Array,
-  radius: number,
-  overlap: number,
-  scaleMul: number,
-  opacity: number,
-  samples: number,
-  tangentMultiplier: number
-): CurveParams {
-  const s = seed.startIdx * 3;
-  const e = seed.endIdx * 3;
-  const startPos: Vec3 = [mesh.vertices[s], mesh.vertices[s + 1], mesh.vertices[s + 2]];
-  const endPos: Vec3 = [mesh.vertices[e], mesh.vertices[e + 1], mesh.vertices[e + 2]];
-  const startNorm: Vec3 = [vertexNormals[s], vertexNormals[s + 1], vertexNormals[s + 2]];
-  const endNorm: Vec3 = [vertexNormals[e], vertexNormals[e + 1], vertexNormals[e + 2]];
-
-  const dist = v3length(v3sub(endPos, startPos));
-  const scale = Math.max(0.05, dist * tangentMultiplier);
-
-  return {
-    startPoint: startPos,
-    startTangent: v3scale(startNorm, scale),
-    endPoint: endPos,
-    endTangent: v3scale(endNorm, -scale),
-    samples,
-    radius,
-    overlap,
-    scaleMul,
-    opacity,
-    startColor: hsvToRgb(seed.hueStart, 0.85, 1.0),
-    endColor: hsvToRgb(seed.hueEnd, 0.85, 1.0),
-  };
+  return [h, max <= 0 ? 0 : d / max, max];
 }

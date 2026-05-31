@@ -1,13 +1,22 @@
 import { OrbitCamera } from './camera.ts';
-import { CurveSeed, curveToGaussians, generateRandomCurveOnMesh, paramsFromSeed } from './curves.ts';
 import { extractAllEdges, extractSilhouetteEdges } from './edge-extractor.ts';
 import { edgesToGaussians, ColorMode, Gaussian3D } from './gaussian-generator.ts';
-import { loadOBJ, Mesh } from './obj-loader.ts';
-import { computeVertexNormals } from './mesh-utils.ts';
+import { loadOBJ } from './obj-loader.ts';
+import { computePrincipalDirections, computeVertexNormals } from './mesh-utils.ts';
 import { GaussianSplatRenderer } from './renderer.ts';
-import { buildVertexAdjacency, generateSurfaceWalk, walkSeedToGaussians, WalkSeed } from './surface-walk.ts';
+import { buildVertexAdjacency } from './surface-walk.ts';
+import {
+  ClusterSeed, ClusterStrategy, ClusterStyle, StrandType,
+  clusterSeedToGaussians, createClusterSeed,
+} from './walk-cluster.ts';
+import { ContourAxis, contoursToGaussians } from './contours.ts';
 
-type RenderMode = 'wireframe' | 'silhouette' | 'curves';
+type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours';
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
 
 async function main() {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -38,73 +47,60 @@ async function main() {
   const allEdges = extractAllEdges(mesh);
   const vertexNormals = computeVertexNormals(mesh);
   const vertexAdjacency = buildVertexAdjacency(mesh);
-  console.log(`Unique edges: ${allEdges.length}`);
+  const principalDirs = computePrincipalDirections(mesh, vertexNormals, vertexAdjacency);
 
   // ─── UI refs ───
   const modeSelect = document.getElementById('mode') as HTMLSelectElement;
   const meshControls = document.getElementById('mesh-controls') as HTMLDivElement;
-  const curveControls = document.getElementById('curve-controls') as HTMLDivElement;
+  const modelingControls = document.getElementById('modeling-controls') as HTMLDivElement;
+  const contourControls = document.getElementById('contour-controls') as HTMLDivElement;
+  const splatControls = document.getElementById('splat-controls') as HTMLDivElement;
+  const walkParams = document.getElementById('walk-params') as HTMLDivElement;
+  const curveParams = document.getElementById('curve-params') as HTMLDivElement;
   const meshInfo = document.getElementById('mesh-info') as HTMLSpanElement;
   const curveInfo = document.getElementById('curve-info') as HTMLSpanElement;
+  const edgeCountDisplay = document.getElementById('edge-count') as HTMLSpanElement;
+  const clusterCountDisplay = document.getElementById('curve-count') as HTMLSpanElement;
+  const splatCountDisplay = document.getElementById('seg-count') as HTMLSpanElement;
 
   const thicknessInput = document.getElementById('thickness') as HTMLInputElement;
-  const thicknessVal = document.getElementById('thickness-val') as HTMLDivElement;
   const colorSelect = document.getElementById('color') as HTMLSelectElement;
-  const edgeCountDisplay = document.getElementById('edge-count') as HTMLSpanElement;
-
-  const curveRadiusInput = document.getElementById('curve-radius') as HTMLInputElement;
-  const curveRadiusVal = document.getElementById('curve-radius-val') as HTMLDivElement;
-  const curveOverlapInput = document.getElementById('curve-overlap') as HTMLInputElement;
-  const curveOverlapVal = document.getElementById('curve-overlap-val') as HTMLDivElement;
-  const curveScaleMulInput = document.getElementById('curve-scalemul') as HTMLInputElement;
-  const curveScaleMulVal = document.getElementById('curve-scalemul-val') as HTMLDivElement;
-  const curveOpacityInput = document.getElementById('curve-opacity') as HTMLInputElement;
-  const curveOpacityVal = document.getElementById('curve-opacity-val') as HTMLDivElement;
-  const curveTmultInput = document.getElementById('curve-tmult') as HTMLInputElement;
-  const curveTmultVal = document.getElementById('curve-tmult-val') as HTMLDivElement;
-  const curveSamplesInput = document.getElementById('curve-samples') as HTMLInputElement;
-  const curveSamplesVal = document.getElementById('curve-samples-val') as HTMLDivElement;
+  const bgColorInput = document.getElementById('bg-color') as HTMLInputElement;
+  const baseColorInput = document.getElementById('c-base') as HTMLInputElement;
+  const clTypeSelect = document.getElementById('cl-type') as HTMLSelectElement;
+  const clStrategySelect = document.getElementById('cl-strategy') as HTMLSelectElement;
+  const ctAxisSelect = document.getElementById('ct-axis') as HTMLSelectElement;
   const showReferenceCheck = document.getElementById('show-reference') as HTMLInputElement;
-  const walkStepsInput = document.getElementById('walk-steps') as HTMLInputElement;
-  const walkStepsVal = document.getElementById('walk-steps-val') as HTMLDivElement;
-  const walkWanderInput = document.getElementById('walk-wander') as HTMLInputElement;
-  const walkWanderVal = document.getElementById('walk-wander-val') as HTMLDivElement;
-  const genWalkBtn = document.getElementById('gen-walk') as HTMLButtonElement;
-  const genCurveBtn = document.getElementById('gen-curve') as HTMLButtonElement;
-  const clearCurvesBtn = document.getElementById('clear-curves') as HTMLButtonElement;
-  const curveCountDisplay = document.getElementById('curve-count') as HTMLSpanElement;
-  const segCountDisplay = document.getElementById('seg-count') as HTMLSpanElement;
+  const genClusterBtn = document.getElementById('gen-cluster') as HTMLButtonElement;
+  const clearBtn = document.getElementById('clear-curves') as HTMLButtonElement;
 
   edgeCountDisplay.textContent = String(allEdges.length);
 
   // ─── State ───
   let currentMode: RenderMode = modeSelect.value as RenderMode;
-  let currentThickness = parseFloat(thicknessInput.value);
-  thicknessVal.textContent = currentThickness.toFixed(1) + ' px';
-  let currentColor = colorSelect.value as ColorMode;
-
-  let curveRadius = parseFloat(curveRadiusInput.value);
-  curveRadiusVal.textContent = curveRadius.toFixed(1);
-  let curveOverlap = parseFloat(curveOverlapInput.value);
-  curveOverlapVal.textContent = curveOverlap.toFixed(2) + '×';
-  let curveScaleMul = parseFloat(curveScaleMulInput.value);
-  curveScaleMulVal.textContent = curveScaleMul.toFixed(1) + '×';
-  let curveOpacity = parseFloat(curveOpacityInput.value);
-  curveOpacityVal.textContent = curveOpacity.toFixed(2);
-  let curveTangentMultiplier = parseFloat(curveTmultInput.value);
-  curveTmultVal.textContent = curveTangentMultiplier.toFixed(1) + '×';
-  let curveSamples = parseInt(curveSamplesInput.value);
-  curveSamplesVal.textContent = String(curveSamples);
+  let lineThickness = parseFloat(thicknessInput.value);
+  let lineColor = colorSelect.value as ColorMode;
+  let strandType = clTypeSelect.value as StrandType;
+  let strategy = clStrategySelect.value as ClusterStrategy;
   let showReference = showReferenceCheck.checked;
 
-  let walkSteps = parseInt(walkStepsInput.value);
-  walkStepsVal.textContent = String(walkSteps);
-  let walkWander = parseFloat(walkWanderInput.value);
-  walkWanderVal.textContent = walkWander.toFixed(2);
+  // Contour params
+  let contourAxis = ctAxisSelect.value as ContourAxis;
+  let contourLevels = 24;
+  let contourHueRange = 0;
 
-  let curveSeeds: CurveSeed[] = [];
-  let walkSeeds: WalkSeed[] = [];
-  let curveGaussians: Gaussian3D[] = [];
+  // Global, live styling shared by every cluster.
+  const style: ClusterStyle = {
+    count: 12, spread: 6,
+    steps: 80, wander: 0.1, noiseScale: 40, smoothing: 2,
+    samples: 24, tangentMult: 0.6,
+    radius: 4, overlap: 1, scaleMul: 1, opacity: 1,
+    baseColor: hexToRgb(baseColorInput.value),
+    hueJitter: 0.1, brightJitter: 0.2,
+    widthVar: 0.3, opacityVar: 0.2, lengthVar: 0.3,
+  };
+
+  let clusterSeeds: ClusterSeed[] = [];
   let meshRefGaussians: Gaussian3D[] = [];
 
   // Camera & renderer
@@ -114,171 +110,169 @@ async function main() {
   camera.updatePosition();
 
   const renderer = new GaussianSplatRenderer(gl);
-
-  function updateUIVisibility() {
-    if (currentMode === 'curves') {
-      meshControls.style.display = 'none';
-      curveControls.style.display = 'block';
-      meshInfo.style.display = 'none';
-      curveInfo.style.display = 'inline';
-    } else {
-      meshControls.style.display = 'block';
-      curveControls.style.display = 'none';
-      meshInfo.style.display = 'inline';
-      curveInfo.style.display = 'none';
-    }
-  }
+  renderer.backgroundColor = hexToRgb(bgColorInput.value);
 
   function buildMeshReferenceGaussians() {
-    meshRefGaussians = edgesToGaussians(mesh, allEdges, 1.5, 'white').map(g => ({
+    meshRefGaussians = edgesToGaussians(mesh, allEdges, 1.5, 'white').map((g) => ({
       ...g,
       opacity: 0.12,
     }));
   }
 
-  function regenerateAllCurves() {
-    curveGaussians = [];
-    for (const seed of curveSeeds) {
-      const params = paramsFromSeed(
-        seed, mesh, vertexNormals,
-        curveRadius, curveOverlap, curveScaleMul, curveOpacity, curveSamples, curveTangentMultiplier
-      );
-      curveGaussians.push(...curveToGaussians(params));
-    }
-    for (const seed of walkSeeds) {
-      curveGaussians.push(...walkSeedToGaussians(
-        seed, mesh, vertexAdjacency,
-        curveRadius, curveOverlap, curveScaleMul, curveOpacity, walkSteps, walkWander
-      ));
-    }
-    regenerateGaussians();
-  }
-
-  function regenerateGaussians() {
+  function regenerate() {
     if (currentMode === 'wireframe') {
-      const gaussians = edgesToGaussians(mesh, allEdges, currentThickness, currentColor);
-      renderer.setGaussians(gaussians);
+      renderer.setGaussians(edgesToGaussians(mesh, allEdges, lineThickness, lineColor));
     } else if (currentMode === 'silhouette') {
       const silEdges = extractSilhouetteEdges(mesh, camera.position);
-      const gaussians = edgesToGaussians(mesh, silEdges, currentThickness, currentColor);
+      renderer.setGaussians(edgesToGaussians(mesh, silEdges, lineThickness, lineColor));
+    } else if (currentMode === 'contours') {
+      const gaussians = contoursToGaussians(mesh, {
+        axis: contourAxis,
+        levels: contourLevels,
+        radius: style.radius,
+        overlap: style.overlap,
+        scaleMul: style.scaleMul,
+        opacity: style.opacity,
+        baseColor: style.baseColor,
+        hueRange: contourHueRange,
+      });
       renderer.setGaussians(gaussians);
-    } else if (currentMode === 'curves') {
-      let all: Gaussian3D[] = [...curveGaussians];
+      clusterCountDisplay.textContent = String(contourLevels);
+      splatCountDisplay.textContent = String(gaussians.length);
+    } else {
+      let all: Gaussian3D[] = [];
+      for (const seed of clusterSeeds) {
+        all.push(...clusterSeedToGaussians(seed, mesh, vertexAdjacency, vertexNormals, principalDirs, style));
+      }
+      const splatCount = all.length;
       if (showReference) {
         buildMeshReferenceGaussians();
         all = all.concat(meshRefGaussians);
       }
       renderer.setGaussians(all);
-      curveCountDisplay.textContent = String(curveSeeds.length + walkSeeds.length);
-      segCountDisplay.textContent = String(curveGaussians.length);
+      clusterCountDisplay.textContent = String(clusterSeeds.length);
+      splatCountDisplay.textContent = String(splatCount);
     }
   }
 
-  function generateCurve() {
-    const result = generateRandomCurveOnMesh(
-      mesh, vertexNormals,
-      curveRadius, curveOverlap, curveScaleMul, curveOpacity, curveSamples, curveTangentMultiplier
-    );
-    curveSeeds.push(result.seed);
-    curveGaussians.push(...result.gaussians);
-    regenerateGaussians();
+  function updateUIVisibility() {
+    const modeling = currentMode === 'modeling';
+    const contours = currentMode === 'contours';
+    const mesh = currentMode === 'wireframe' || currentMode === 'silhouette';
+    meshControls.style.display = mesh ? 'block' : 'none';
+    modelingControls.style.display = modeling ? 'block' : 'none';
+    contourControls.style.display = contours ? 'block' : 'none';
+    splatControls.style.display = modeling || contours ? 'block' : 'none';
+    meshInfo.style.display = mesh ? 'inline' : 'none';
+    curveInfo.style.display = mesh ? 'none' : 'inline';
   }
 
-  function generateWalk() {
-    const result = generateSurfaceWalk(
-      mesh, vertexAdjacency,
-      curveRadius, curveOverlap, curveScaleMul, curveOpacity, walkSteps, walkWander
-    );
-    walkSeeds.push(result.seed);
-    regenerateAllCurves();
+  function updateStrandParamVisibility() {
+    walkParams.style.display = strandType === 'walk' ? 'block' : 'none';
+    curveParams.style.display = strandType === 'curve' ? 'block' : 'none';
   }
 
-  function clearCurves() {
-    curveSeeds = [];
-    walkSeeds = [];
-    curveGaussians = [];
-    regenerateGaussians();
+  // ─── Generic binders ───
+  function bindRange(id: string, set: (v: number) => void, fmt: (v: number) => string) {
+    const el = document.getElementById(id) as HTMLInputElement;
+    const val = document.getElementById(id + '-val');
+    const run = () => {
+      const v = parseFloat(el.value);
+      set(v);
+      if (val) val.textContent = fmt(v);
+    };
+    el.addEventListener('input', () => { run(); regenerate(); });
+    run(); // initialise label + state without regenerating
   }
 
-  // Initial render
-  regenerateGaussians();
-  updateUIVisibility();
+  // Cluster shape
+  bindRange('cl-count', (v) => (style.count = v), (v) => String(Math.round(v)));
+  bindRange('cl-spread', (v) => (style.spread = v), (v) => String(Math.round(v)));
+  bindRange('cl-length-var', (v) => (style.lengthVar = v), (v) => v.toFixed(2));
+  // Walk strands
+  bindRange('cl-steps', (v) => (style.steps = v), (v) => String(Math.round(v)));
+  bindRange('cl-wander', (v) => (style.wander = v), (v) => v.toFixed(2));
+  bindRange('cl-noise', (v) => (style.noiseScale = v), (v) => v.toFixed(0));
+  bindRange('cl-smooth', (v) => (style.smoothing = v), (v) => String(Math.round(v)));
+  // Curve strands
+  bindRange('cl-samples', (v) => (style.samples = v), (v) => String(Math.round(v)));
+  bindRange('cl-tangent', (v) => (style.tangentMult = v), (v) => v.toFixed(1) + '×');
+  // Gaussian / splat
+  bindRange('g-radius', (v) => (style.radius = v), (v) => v.toFixed(1));
+  bindRange('g-overlap', (v) => (style.overlap = v), (v) => v.toFixed(2) + '×');
+  bindRange('g-scale', (v) => (style.scaleMul = v), (v) => v.toFixed(1) + '×');
+  bindRange('g-opacity', (v) => (style.opacity = v), (v) => v.toFixed(2));
+  bindRange('g-width-var', (v) => (style.widthVar = v), (v) => v.toFixed(2));
+  bindRange('g-opacity-var', (v) => (style.opacityVar = v), (v) => v.toFixed(2));
+  // Colour jitter
+  bindRange('c-hue-jitter', (v) => (style.hueJitter = v), (v) => v.toFixed(2));
+  bindRange('c-bright-jitter', (v) => (style.brightJitter = v), (v) => v.toFixed(2));
+  // Contours
+  bindRange('ct-levels', (v) => (contourLevels = v), (v) => String(Math.round(v)));
+  bindRange('ct-huerange', (v) => (contourHueRange = v), (v) => v.toFixed(2));
+  // Mesh line thickness
+  bindRange('thickness', (v) => (lineThickness = v), (v) => v.toFixed(1) + ' px');
 
-  // ─── Events ───
+  // ─── Selects, colours, checkboxes ───
   modeSelect.addEventListener('change', () => {
     currentMode = modeSelect.value as RenderMode;
     updateUIVisibility();
-    regenerateGaussians();
-  });
-
-  thicknessInput.addEventListener('input', () => {
-    currentThickness = parseFloat(thicknessInput.value);
-    thicknessVal.textContent = currentThickness.toFixed(1) + ' px';
-    regenerateGaussians();
+    regenerate();
   });
 
   colorSelect.addEventListener('change', () => {
-    currentColor = colorSelect.value as ColorMode;
-    regenerateGaussians();
+    lineColor = colorSelect.value as ColorMode;
+    regenerate();
   });
 
-  // Curve param events — regenerate all existing curves with new values
-  curveRadiusInput.addEventListener('input', () => {
-    curveRadius = parseFloat(curveRadiusInput.value);
-    curveRadiusVal.textContent = curveRadius.toFixed(1);
-    if (currentMode === 'curves') regenerateAllCurves();
+  bgColorInput.addEventListener('input', () => {
+    renderer.backgroundColor = hexToRgb(bgColorInput.value);
   });
 
-  curveOverlapInput.addEventListener('input', () => {
-    curveOverlap = parseFloat(curveOverlapInput.value);
-    curveOverlapVal.textContent = curveOverlap.toFixed(2) + '×';
-    if (currentMode === 'curves') regenerateAllCurves();
+  baseColorInput.addEventListener('input', () => {
+    style.baseColor = hexToRgb(baseColorInput.value);
+    regenerate();
   });
 
-  curveScaleMulInput.addEventListener('input', () => {
-    curveScaleMul = parseFloat(curveScaleMulInput.value);
-    curveScaleMulVal.textContent = curveScaleMul.toFixed(1) + '×';
-    if (currentMode === 'curves') regenerateAllCurves();
+  // Strand type / strategy are stored per-cluster at creation, so changing them
+  // only affects the NEXT cluster — no regenerate of existing clusters.
+  clTypeSelect.addEventListener('change', () => {
+    strandType = clTypeSelect.value as StrandType;
+    updateStrandParamVisibility();
+  });
+  clStrategySelect.addEventListener('change', () => {
+    strategy = clStrategySelect.value as ClusterStrategy;
   });
 
-  curveOpacityInput.addEventListener('input', () => {
-    curveOpacity = parseFloat(curveOpacityInput.value);
-    curveOpacityVal.textContent = curveOpacity.toFixed(2);
-    if (currentMode === 'curves') regenerateAllCurves();
-  });
-
-  curveTmultInput.addEventListener('input', () => {
-    curveTangentMultiplier = parseFloat(curveTmultInput.value);
-    curveTmultVal.textContent = curveTangentMultiplier.toFixed(1) + '×';
-    if (currentMode === 'curves') regenerateAllCurves();
-  });
-
-  curveSamplesInput.addEventListener('input', () => {
-    curveSamples = parseInt(curveSamplesInput.value);
-    curveSamplesVal.textContent = String(curveSamples);
-    if (currentMode === 'curves') regenerateAllCurves();
+  ctAxisSelect.addEventListener('change', () => {
+    contourAxis = ctAxisSelect.value as ContourAxis;
+    regenerate();
   });
 
   showReferenceCheck.addEventListener('change', () => {
     showReference = showReferenceCheck.checked;
-    regenerateGaussians();
+    regenerate();
   });
 
-  walkStepsInput.addEventListener('input', () => {
-    walkSteps = parseInt(walkStepsInput.value);
-    walkStepsVal.textContent = String(walkSteps);
-    if (currentMode === 'curves') regenerateAllCurves();
+  genClusterBtn.addEventListener('click', () => {
+    clusterSeeds.push(createClusterSeed(mesh, strandType, strategy));
+    regenerate();
   });
 
-  walkWanderInput.addEventListener('input', () => {
-    walkWander = parseFloat(walkWanderInput.value);
-    walkWanderVal.textContent = walkWander.toFixed(2);
-    if (currentMode === 'curves') regenerateAllCurves();
+  clearBtn.addEventListener('click', () => {
+    clusterSeeds = [];
+    regenerate();
   });
 
-  genWalkBtn.addEventListener('click', generateWalk);
-  genCurveBtn.addEventListener('click', generateCurve);
-  clearCurvesBtn.addEventListener('click', clearCurves);
+  // Collapsible panels
+  document.querySelectorAll('.panel-header').forEach((hdr) => {
+    hdr.addEventListener('click', () => hdr.parentElement!.classList.toggle('collapsed'));
+  });
+
+  // Initial render
+  updateUIVisibility();
+  updateStrandParamVisibility();
+  regenerate();
 
   // Silhouette recompute on camera move
   let lastCamPos = [...camera.position] as [number, number, number];
@@ -292,9 +286,9 @@ async function main() {
     const dx = camera.position[0] - lastCamPos[0];
     const dy = camera.position[1] - lastCamPos[1];
     const dz = camera.position[2] - lastCamPos[2];
-    if (Math.sqrt(dx*dx + dy*dy + dz*dz) > 0.005) {
+    if (Math.sqrt(dx * dx + dy * dy + dz * dz) > 0.005) {
       lastCamPos = [...camera.position] as [number, number, number];
-      regenerateGaussians();
+      regenerate();
       framesSinceSilUpdate = 0;
     }
   }

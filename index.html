@@ -83,104 +83,304 @@
       line-height: 1.5;
     }
     .info span { color: #ccc; }
+
+    #controls {
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+    .panel {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #4fc3f7;
+      padding: 8px 10px;
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
+      background: rgba(79, 195, 247, 0.06);
+    }
+    .panel-header .chev {
+      font-size: 9px;
+      transition: transform 0.15s;
+    }
+    .panel.collapsed .chev { transform: rotate(-90deg); }
+    .panel.collapsed .panel-body { display: none; }
+    .panel-body { padding: 10px 10px 2px; }
+    .panel-body .section-title:first-child { margin-top: 0; }
+    .control-group input[type="color"] {
+      width: 100%;
+      height: 28px;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 2px;
+    }
+    .row { display: flex; gap: 8px; }
+    .row > .control-group { flex: 1; }
+    .btn {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .btn-accent { background: #3a2b4b; border-color: #6f4a8f; color: #d9bff5; }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
   <div id="controls">
-    <h1>3DGS Line Renderer</h1>
+    <h1>3DGS NPR Studio</h1>
     <div class="control-group">
       <label>Render Mode</label>
       <select id="mode">
         <option value="wireframe">Wireframe (All Edges)</option>
         <option value="silhouette">Silhouette / Outline</option>
-        <option value="curves">Generative Curves</option>
+        <option value="modeling">Modeling (Clusters)</option>
+        <option value="contours">Contours (Iso-lines)</option>
       </select>
     </div>
 
-    <!-- Mesh controls -->
-    <div id="mesh-controls">
-      <div class="control-group">
-        <label>Line Thickness</label>
-        <input type="range" id="thickness" min="0.5" max="12" step="0.5" value="3" />
-        <div class="value-display" id="thickness-val">3.0 px</div>
-      </div>
-      <div class="control-group">
-        <label>Line Color</label>
-        <select id="color">
-          <option value="white">White</option>
-          <option value="cyan">Cyan</option>
-          <option value="orange">Orange</option>
-          <option value="rainbow">Rainbow (by normal)</option>
-        </select>
+    <!-- Scene (always visible) -->
+    <div class="panel">
+      <div class="panel-header">Scene <span class="chev">▾</span></div>
+      <div class="panel-body">
+        <div class="control-group">
+          <label>Background Color</label>
+          <input type="color" id="bg-color" value="#0a0a0a" />
+        </div>
       </div>
     </div>
 
-    <!-- Curve controls -->
-    <div id="curve-controls" style="display:none;">
-      <div class="section-title">Gaussian Splat Params</div>
-      <div class="control-group">
-        <label>Tube Radius <span class="hint">(perpendicular σ — XY)</span></label>
-        <input type="range" id="curve-radius" min="0.5" max="20" step="0.5" value="4" />
-        <div class="value-display" id="curve-radius-val">4.0</div>
+    <!-- Mesh controls (wireframe / silhouette) -->
+    <div id="mesh-controls">
+      <div class="panel">
+        <div class="panel-header">Line <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="control-group">
+            <label>Line Thickness</label>
+            <input type="range" id="thickness" min="0.5" max="12" step="0.5" value="3" />
+            <div class="value-display" id="thickness-val">3.0 px</div>
+          </div>
+          <div class="control-group">
+            <label>Line Color</label>
+            <select id="color">
+              <option value="white">White</option>
+              <option value="cyan">Cyan</option>
+              <option value="orange">Orange</option>
+              <option value="rainbow">Rainbow (by normal)</option>
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="control-group">
-        <label>Coverage / Overlap <span class="hint">(along-curve σ)</span></label>
-        <input type="range" id="curve-overlap" min="0.5" max="2.5" step="0.05" value="1" />
-        <div class="value-display" id="curve-overlap-val">1.00×</div>
+    </div>
+
+    <!-- Modeling controls (clusters) -->
+    <div id="modeling-controls" style="display:none;">
+
+      <!-- Cluster Tool -->
+      <div class="panel">
+        <div class="panel-header">Cluster Tool <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="row">
+            <div class="control-group">
+              <label>Strand Type</label>
+              <select id="cl-type">
+                <option value="walk">Surface Walk</option>
+                <option value="curve">Generative Curve</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label>Strands</label>
+              <input type="range" id="cl-count" min="1" max="80" step="1" value="12" />
+              <div class="value-display" id="cl-count-val">12</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Spread <span class="hint">(start-patch radius, in vertex rings)</span></label>
+            <input type="range" id="cl-spread" min="1" max="40" step="1" value="6" />
+            <div class="value-display" id="cl-spread-val">6</div>
+          </div>
+          <div class="control-group">
+            <label>Length Variation <span class="hint">(per-strand)</span></label>
+            <input type="range" id="cl-length-var" min="0" max="1" step="0.02" value="0.3" />
+            <div class="value-display" id="cl-length-var-val">0.30</div>
+          </div>
+
+          <!-- Walk-only params -->
+          <div id="walk-params">
+            <div class="control-group">
+              <label>Steering Strategy</label>
+              <select id="cl-strategy">
+                <option value="curvature">Surface Curvature</option>
+                <option value="direction">Global Direction</option>
+                <option value="noise">Noise Field</option>
+                <option value="random">Random</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label>Steps <span class="hint">(vertices traversed)</span></label>
+              <input type="range" id="cl-steps" min="2" max="400" step="1" value="80" />
+              <div class="value-display" id="cl-steps-val">80</div>
+            </div>
+            <div class="control-group">
+              <label>Wander <span class="hint">(0 = straightest, 1 = random)</span></label>
+              <input type="range" id="cl-wander" min="0" max="1" step="0.01" value="0.1" />
+              <div class="value-display" id="cl-wander-val">0.10</div>
+            </div>
+            <div class="control-group">
+              <label>Smoothness <span class="hint">(de-facets the vertex path)</span></label>
+              <input type="range" id="cl-smooth" min="0" max="4" step="1" value="2" />
+              <div class="value-display" id="cl-smooth-val">2</div>
+            </div>
+            <div class="control-group">
+              <label>Noise Scale <span class="hint">(Noise Field only)</span></label>
+              <input type="range" id="cl-noise" min="5" max="120" step="1" value="40" />
+              <div class="value-display" id="cl-noise-val">40</div>
+            </div>
+          </div>
+
+          <!-- Curve-only params -->
+          <div id="curve-params" style="display:none;">
+            <div class="control-group">
+              <label>Samples <span class="hint">(splats per curve)</span></label>
+              <input type="range" id="cl-samples" min="3" max="100" step="1" value="24" />
+              <div class="value-display" id="cl-samples-val">24</div>
+            </div>
+            <div class="control-group">
+              <label>Tangent Multiplier <span class="hint">(arc bulge)</span></label>
+              <input type="range" id="cl-tangent" min="0.2" max="2" step="0.1" value="0.6" />
+              <div class="value-display" id="cl-tangent-val">0.6×</div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Show Bunny Reference</label>
+            <input type="checkbox" id="show-reference" checked />
+          </div>
+          <div class="control-group">
+            <button id="gen-cluster" class="btn btn-accent">Generate Cluster</button>
+          </div>
+          <div class="control-group">
+            <button id="clear-curves" class="btn">Clear All</button>
+          </div>
+        </div>
       </div>
-      <div class="control-group">
-        <label>Global Scale <span class="hint">(all axes)</span></label>
-        <input type="range" id="curve-scalemul" min="0.2" max="4" step="0.1" value="1" />
-        <div class="value-display" id="curve-scalemul-val">1.0×</div>
+    </div>
+
+    <!-- Contour Tool (contours mode) -->
+    <div id="contour-controls" style="display:none;">
+      <div class="panel">
+        <div class="panel-header">Contour Tool <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="row">
+            <div class="control-group">
+              <label>Slice Axis</label>
+              <select id="ct-axis" title="Slice axis">
+                <option value="y">Y (horizontal)</option>
+                <option value="x">X</option>
+                <option value="z">Z</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label>Levels</label>
+              <input type="range" id="ct-levels" min="2" max="80" step="1" value="24" />
+              <div class="value-display" id="ct-levels-val">24</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Color Spread <span class="hint">(hue across levels — topographic)</span></label>
+            <input type="range" id="ct-huerange" min="0" max="1" step="0.02" value="0" />
+            <div class="value-display" id="ct-huerange-val">0.00</div>
+          </div>
+        </div>
       </div>
-      <div class="control-group">
-        <label>Opacity</label>
-        <input type="range" id="curve-opacity" min="0.05" max="1" step="0.05" value="1" />
-        <div class="value-display" id="curve-opacity-val">1.00</div>
+    </div>
+
+    <!-- Splat & Colour (modeling OR contours) -->
+    <div id="splat-controls" style="display:none;">
+
+      <!-- Gaussian & Render -->
+      <div class="panel">
+        <div class="panel-header">Gaussian &amp; Render <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="control-group">
+            <label>Tube Radius <span class="hint">(perpendicular σ — XY)</span></label>
+            <input type="range" id="g-radius" min="0.5" max="20" step="0.5" value="4" />
+            <div class="value-display" id="g-radius-val">4.0</div>
+          </div>
+          <div class="control-group">
+            <label>Coverage / Overlap <span class="hint">(along-curve σ)</span></label>
+            <input type="range" id="g-overlap" min="0.5" max="2.5" step="0.05" value="1" />
+            <div class="value-display" id="g-overlap-val">1.00×</div>
+          </div>
+          <div class="control-group">
+            <label>Global Scale <span class="hint">(all axes)</span></label>
+            <input type="range" id="g-scale" min="0.2" max="4" step="0.1" value="1" />
+            <div class="value-display" id="g-scale-val">1.0×</div>
+          </div>
+          <div class="control-group">
+            <label>Opacity</label>
+            <input type="range" id="g-opacity" min="0.05" max="1" step="0.05" value="1" />
+            <div class="value-display" id="g-opacity-val">1.00</div>
+          </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Width Var</label>
+              <input type="range" id="g-width-var" min="0" max="1" step="0.02" value="0.3" />
+              <div class="value-display" id="g-width-var-val">0.30</div>
+            </div>
+            <div class="control-group">
+              <label>Opacity Var</label>
+              <input type="range" id="g-opacity-var" min="0" max="1" step="0.02" value="0.2" />
+              <div class="value-display" id="g-opacity-var-val">0.20</div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="section-title">Curve Shape</div>
-      <div class="control-group">
-        <label>Samples <span class="hint">(splats per curve — lower = fewer)</span></label>
-        <input type="range" id="curve-samples" min="3" max="100" step="1" value="16" />
-        <div class="value-display" id="curve-samples-val">16</div>
-      </div>
-      <div class="control-group">
-        <label>Tangent Multiplier <span class="hint">(arc bulge)</span></label>
-        <input type="range" id="curve-tmult" min="0.2" max="2" step="0.1" value="0.6" />
-        <div class="value-display" id="curve-tmult-val">0.6×</div>
-      </div>
-      <div class="control-group">
-        <label>Show Bunny Reference</label>
-        <input type="checkbox" id="show-reference" checked />
-      </div>
-
-      <div class="section-title">Surface Walk</div>
-      <div class="control-group">
-        <label>Steps <span class="hint">(vertices traversed along surface)</span></label>
-        <input type="range" id="walk-steps" min="2" max="400" step="1" value="80" />
-        <div class="value-display" id="walk-steps-val">80</div>
-      </div>
-      <div class="control-group">
-        <label>Wander <span class="hint">(0 = straightest, 1 = random)</span></label>
-        <input type="range" id="walk-wander" min="0" max="1" step="0.01" value="0" />
-        <div class="value-display" id="walk-wander-val">0.00</div>
-      </div>
-      <div class="control-group">
-        <button id="gen-walk" style="width:100%;background:#1b3a4b;border:1px solid #2a6f8f;color:#9fdcf5;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Walk on Surface</button>
-      </div>
-
-      <div class="control-group" style="display:flex;gap:8px;">
-        <button id="gen-curve" style="flex:1;background:#222;border:1px solid #444;color:#fff;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Generate Curve</button>
-        <button id="clear-curves" style="flex:1;background:#222;border:1px solid #444;color:#fff;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Clear</button>
+      <!-- Color -->
+      <div class="panel">
+        <div class="panel-header">Color <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="control-group">
+            <label>Base Color</label>
+            <input type="color" id="c-base" value="#4fc3f7" />
+          </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Hue Jitter</label>
+              <input type="range" id="c-hue-jitter" min="0" max="1" step="0.02" value="0.1" />
+              <div class="value-display" id="c-hue-jitter-val">0.10</div>
+            </div>
+            <div class="control-group">
+              <label>Bright Jitter</label>
+              <input type="range" id="c-bright-jitter" min="0" max="1" step="0.02" value="0.2" />
+              <div class="value-display" id="c-bright-jitter-val">0.20</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="info">
       <span>Model:</span> Stanford Bunny<br>
       <span id="mesh-info"><span>Edges:</span> <span id="edge-count">-</span><br></span>
-      <span id="curve-info" style="display:none;"><span>Curves:</span> <span id="curve-count">0</span> &nbsp;|&nbsp; <span>Segs:</span> <span id="seg-count">0</span><br></span>
+      <span id="curve-info" style="display:none;"><span>Clusters:</span> <span id="curve-count">0</span> &nbsp;|&nbsp; <span>Splats:</span> <span id="seg-count">0</span><br></span>
       <span>Controls:</span> Left-drag to rotate, scroll to zoom
     </div>
   </div>
