@@ -182,6 +182,7 @@
         <option value="modeling">Modeling (Clusters)</option>
         <option value="contours">Contours (Iso-lines)</option>
         <option value="flow">Flow Field (Whole Model)</option>
+        <option value="spline">Spline Through Points</option>
       </select>
     </div>
 
@@ -389,7 +390,54 @@
       </div>
     </div>
 
-    <!-- Splat & Colour (modeling OR contours OR flow) -->
+    <!-- Spline Tool (spline mode) -->
+    <div id="spline-controls" style="display:none;">
+      <div class="panel">
+        <div class="panel-header">Spline Tool <span class="chev">▾</span></div>
+        <div class="panel-body">
+          <div class="row">
+            <div class="control-group">
+              <label>Points <span class="hint">(passes through)</span></label>
+              <input type="range" id="sp-points" min="2" max="20" step="1" value="6" />
+              <div class="value-display" id="sp-points-val">6</div>
+            </div>
+            <div class="control-group">
+              <label>Spread <span class="hint">(point scatter)</span></label>
+              <input type="range" id="sp-spread" min="0" max="1" step="0.02" value="0.35" />
+              <div class="value-display" id="sp-spread-val">0.35</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Tension <span class="hint">(1 = straight, 0 = round, − = loose)</span></label>
+            <input type="range" id="sp-tension" min="-1" max="1" step="0.02" value="0" />
+            <div class="value-display" id="sp-tension-val">0.00</div>
+          </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Bias</label>
+              <input type="range" id="sp-bias" min="-1" max="1" step="0.02" value="0" />
+              <div class="value-display" id="sp-bias-val">0.00</div>
+            </div>
+            <div class="control-group">
+              <label>Continuity</label>
+              <input type="range" id="sp-continuity" min="-1" max="1" step="0.02" value="0" />
+              <div class="value-display" id="sp-continuity-val">0.00</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Samples / Segment</label>
+            <input type="range" id="sp-samples" min="2" max="80" step="1" value="24" />
+            <div class="value-display" id="sp-samples-val">24</div>
+          </div>
+          <div class="control-group">
+            <button id="gen-spline" class="btn btn-accent">New Points</button>
+          </div>
+          <div class="note">Width is shaped by the Width Profile (Gaussian panel); colour ramps A → B along the curve.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Splat & Colour (modeling OR contours OR flow OR spline) -->
     <div id="splat-controls" style="display:none;">
 
       <!-- Gaussian & Render -->
