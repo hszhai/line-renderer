@@ -196,6 +196,31 @@ export function smoothPolyline(points: Vec3[], iterations: number): Vec3[] {
   return pts;
 }
 
+/** Offset a polyline by `distance` in 3D, using the parallel-transport (rotation-
+ *  minimizing) frame so the companion curve stays smooth and twist-free. `angle`
+ *  (degrees) picks which way around the tangent to push — 0 = along the frame's
+ *  normal N, 90 = along the binormal B. Reuses the same frame that orients the
+ *  tube splats, so the offset rides consistently alongside the original. */
+export function offsetCurve(points: Vec3[], distance: number, angle: number): Vec3[] {
+  const n = points.length;
+  if (n < 2) return points.map((p) => [...p] as Vec3);
+  const frames = computeParallelTransportFrames(points);
+  const last = frames.N.length - 1; // one frame per segment
+  const ca = Math.cos((angle * Math.PI) / 180);
+  const sa = Math.sin((angle * Math.PI) / 180);
+  const out: Vec3[] = [];
+  for (let i = 0; i < n; i++) {
+    const fi = Math.min(i, last);
+    const N = frames.N[fi], B = frames.B[fi];
+    out.push([
+      points[i][0] + (ca * N[0] + sa * B[0]) * distance,
+      points[i][1] + (ca * N[1] + sa * B[1]) * distance,
+      points[i][2] + (ca * N[2] + sa * B[2]) * distance,
+    ]);
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Generative helpers
 // ─────────────────────────────────────────────────────────────
