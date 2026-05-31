@@ -72,6 +72,7 @@ export class GaussianSplatRenderer {
 
   viewportWidth = 1;
   viewportHeight = 1;
+  backgroundColor: [number, number, number] = [0.04, 0.04, 0.04];
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -186,9 +187,16 @@ export class GaussianSplatRenderer {
   }
 
   render(viewMatrix: Mat4, projMatrix: Mat4) {
+    const gl = this.gl;
+
+    // Always clear to the background colour first, so it updates even when the
+    // scene is empty or everything is culled.
+    gl.viewport(0, 0, this.viewportWidth, this.viewportHeight);
+    gl.clearColor(this.backgroundColor[0], this.backgroundColor[1], this.backgroundColor[2], 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
     if (this.numGaussians === 0) return;
 
-    const gl = this.gl;
     const w = this.viewportWidth;
     const h = this.viewportHeight;
 
@@ -366,11 +374,7 @@ export class GaussianSplatRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.vertexData.subarray(0, vOff), gl.DYNAMIC_DRAW);
 
-    // Render
-    gl.viewport(0, 0, w, h);
-    gl.clearColor(0.04, 0.04, 0.04, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
+    // Render (background already cleared at the top of this method)
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     gl.drawElements(gl.TRIANGLES, visibleCount * 6, gl.UNSIGNED_INT, 0);

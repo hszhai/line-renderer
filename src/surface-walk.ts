@@ -10,20 +10,8 @@
 // Every vertex lies exactly on the mesh, so the resulting polyline hugs it.
 // ─────────────────────────────────────────────────────────────
 
-import { Gaussian3D } from './gaussian-generator.ts';
-import { hsvToRgb, pointsToGaussians } from './curves.ts';
 import { Mesh } from './obj-loader.ts';
-import { Vec3, v3dot, v3normalize, v3sub } from './math.ts';
-
-/** Persistent seed so a walk can be regenerated with new params. The path is
- *  fully determined by the start vertex + RNG seed; `steps` and `wander` are
- *  applied live at regeneration time (like a curve's `samples`). */
-export interface WalkSeed {
-  startIdx: number;
-  rngSeed: number;
-  hueStart: number;
-  hueEnd: number;
-}
+import { Vec3, v3dot, v3length, v3normalize, v3sub } from './math.ts';
 
 /** Build a vertex → unique-neighbour adjacency list from the mesh triangles.
  *  Computed once per mesh and reused for every walk. */
@@ -41,7 +29,7 @@ export function buildVertexAdjacency(mesh: Mesh): number[][] {
 }
 
 /** Small deterministic PRNG so a stored seed always replays the same walk. */
-function mulberry32(seed: number): () => number {
+export function createRng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -51,10 +39,37 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function vertexPos(mesh: Mesh, idx: number): Vec3 {
+export function vertexPos(mesh: Mesh, idx: number): Vec3 {
   const i = idx * 3;
   return [mesh.vertices[i], mesh.vertices[i + 1], mesh.vertices[i + 2]];
 }
+
+/** Collect vertices within `rings` graph hops of `center` (breadth-first).
+ *  Used to scatter a cluster's strand start points over a local patch. */
+export function gatherNearbyVertices(adjacency: number[][], center: number, rings: number): number[] {
+  const visited = new Set<number>([center]);
+  let frontier = [center];
+  for (let r = 0; r < rings; r++) {
+    const next: number[] = [];
+    for (const v of frontier) {
+      for (const n of adjacency[v]) {
+        if (!visited.has(n)) {
+          visited.add(n);
+          next.push(n);
+        }
+      }
+    }
+    if (next.length === 0) break;
+    frontier = next;
+  }
+  return Array.from(visited);
+}
+
+/** A steering function: given the current position, heading, and the current
+ *  vertex index, returns the world-space direction the walk "wants" to go.
+ *  Candidate hops are scored by alignment with this. Omit to walk straightest
+ *  (continue along the heading). */
+export type SteerFn = (pos: Vec3, heading: Vec3, vertexIdx: number) => Vec3;
 
 interface Candidate { idx: number; dir: Vec3; straightness: number; }
 
@@ -93,7 +108,8 @@ export function surfaceWalkPoints(
   startIdx: number,
   steps: number,
   wander: number,
-  rng: () => number
+  rng: () => number,
+  steer?: SteerFn
 ): Vec3[] {
   const points: Vec3[] = [vertexPos(mesh, startIdx)];
 
@@ -108,14 +124,22 @@ export function surfaceWalkPoints(
   for (let s = 0; s < steps; s++) {
     const prev = current;
     current = next;
-    points.push(vertexPos(mesh, current));
-
     const here = vertexPos(mesh, current);
+    points.push(here);
+
+    // The reference direction candidates are scored against: a steering target
+    // (global direction / noise field) if supplied, else the current heading.
+    let ref = heading;
+    if (steer) {
+      const want = v3normalize(steer(here, heading, current));
+      if (v3length(want) > 1e-6) ref = want;
+    }
+
     const cands: Candidate[] = [];
     for (const c of adjacency[current]) {
       if (c === prev) continue; // don't immediately backtrack
       const dir = v3normalize(v3sub(vertexPos(mesh, c), here));
-      cands.push({ idx: c, dir, straightness: v3dot(dir, heading) });
+      cands.push({ idx: c, dir, straightness: v3dot(dir, ref) });
     }
     if (cands.length === 0) break; // dead end (only neighbour was prev)
 
@@ -125,50 +149,4 @@ export function surfaceWalkPoints(
   }
 
   return points;
-}
-
-/** Rebuild a walk's Gaussians from its seed + current global splat params. */
-export function walkSeedToGaussians(
-  seed: WalkSeed,
-  mesh: Mesh,
-  adjacency: number[][],
-  radius: number,
-  overlap: number,
-  scaleMul: number,
-  opacity: number,
-  steps: number,
-  wander: number
-): Gaussian3D[] {
-  const rng = mulberry32(seed.rngSeed);
-  const points = surfaceWalkPoints(mesh, adjacency, seed.startIdx, steps, wander, rng);
-  return pointsToGaussians(
-    points, radius, overlap, scaleMul, opacity,
-    hsvToRgb(seed.hueStart, 0.85, 1.0),
-    hsvToRgb(seed.hueEnd, 0.85, 1.0)
-  );
-}
-
-/** Start a new random surface walk and return its Gaussians + replayable seed. */
-export function generateSurfaceWalk(
-  mesh: Mesh,
-  adjacency: number[][],
-  radius: number,
-  overlap: number,
-  scaleMul: number,
-  opacity: number,
-  steps: number,
-  wander: number
-): { gaussians: Gaussian3D[]; seed: WalkSeed } {
-  const numVerts = mesh.vertices.length / 3;
-  const hueStart = Math.random();
-  const seed: WalkSeed = {
-    startIdx: Math.floor(Math.random() * numVerts),
-    rngSeed: (Math.random() * 0xffffffff) >>> 0,
-    hueStart,
-    hueEnd: (hueStart + 0.25 + Math.random() * 0.3) % 1.0,
-  };
-  return {
-    gaussians: walkSeedToGaussians(seed, mesh, adjacency, radius, overlap, scaleMul, opacity, steps, wander),
-    seed,
-  };
 }
