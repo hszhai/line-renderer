@@ -13,9 +13,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Gaussian3D } from './gaussian-generator.ts';
-import { hsvToRgb, pointsToGaussians, rgbToHsv } from './curves.ts';
+import { jitterColor, lerpColor, pointsToGaussians } from './curves.ts';
 import { Mesh } from './obj-loader.ts';
 import { Vec3 } from './math.ts';
+import { createRng } from './surface-walk.ts';
 
 export type ContourAxis = 'x' | 'y' | 'z';
 
@@ -25,10 +26,16 @@ export interface ContourStyle {
   radius: number;
   overlap: number;
   scaleMul: number;
-  opacity: number;
-  baseColor: Vec3;
-  hueRange: number;    // hue spread across levels (0 = flat colour, 1 = full wheel)
+  // Colour & opacity gradients across the level stack (A = low, B = high) + jitter.
+  opacity: number;     // opacity A
+  opacityB: number;    // opacity B
+  colorA: Vec3;
+  colorB: Vec3;
+  hueJitter: number;
+  brightJitter: number;
 }
+
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 /** Intersection segment of triangle (i0,i1,i2) with the plane axis = L, or null
  *  if the triangle isn't crossed. */
@@ -68,17 +75,19 @@ export function contoursToGaussians(mesh: Mesh, style: ContourStyle): Gaussian3D
   if (range < 1e-9) return [];
 
   const levels = Math.max(1, Math.round(style.levels));
-  const [bh, bs, bv] = rgbToHsv(style.baseColor);
+  const rng = createRng(0xc07024);
 
   const out: Gaussian3D[] = [];
   for (let l = 0; l < levels; l++) {
     const t = (l + 0.5) / levels;           // 0..1, centred so planes avoid the extremes
     const L = lo + range * t;
-    const color = hsvToRgb((bh + (t - 0.5) * style.hueRange + 1) % 1, bs, bv);
+    // Each ring: a mix of A→B across the stack, then a touch of jitter.
+    const color = jitterColor(lerpColor(style.colorA, style.colorB, t), style.hueJitter, style.brightJitter, rng);
+    const opacity = clamp01(style.opacity + (style.opacityB - style.opacity) * t);
     for (let fi = 0; fi < F.length; fi += 3) {
       const seg = triangleIso(V, ax, F[fi], F[fi + 1], F[fi + 2], L);
       if (seg) {
-        out.push(...pointsToGaussians(seg, style.radius, style.overlap, style.scaleMul, style.opacity, color, color));
+        out.push(...pointsToGaussians(seg, style.radius, style.overlap, style.scaleMul, opacity, color, color));
       }
     }
   }

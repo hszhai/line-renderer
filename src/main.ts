@@ -1,8 +1,8 @@
 import { OrbitCamera } from './camera.ts';
 import { extractAllEdges, extractSilhouetteEdges } from './edge-extractor.ts';
 import { edgesToGaussians, ColorMode, Gaussian3D } from './gaussian-generator.ts';
-import { loadOBJ } from './obj-loader.ts';
-import { computePrincipalDirections, computeVertexNormals } from './mesh-utils.ts';
+import { loadOBJ, Mesh } from './obj-loader.ts';
+import { computePrincipalDirections, computeVertexNormals, decimateMesh } from './mesh-utils.ts';
 import { GaussianSplatRenderer } from './renderer.ts';
 import { buildVertexAdjacency } from './surface-walk.ts';
 import {
@@ -10,12 +10,40 @@ import {
   clusterSeedToGaussians, createClusterSeed,
 } from './walk-cluster.ts';
 import { ContourAxis, contoursToGaussians } from './contours.ts';
+import { flowFieldToGaussians } from './flow-field.ts';
+import { ProfileEditor } from './profile-editor.ts';
 
-type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours';
+type RenderMode = 'wireframe' | 'silhouette' | 'modeling' | 'contours' | 'flow';
+
+// Canonical size every model is normalized to, so the splat sizing, camera, and
+// noise scales stay calibrated regardless of the source model's units.
+const MODEL_SIZE = 0.2;
+// High-res meshes are decimated to ~this many vertices on load, so the surface
+// walks step meaningfully and the reference/contours stay performant.
+const MAX_VERTS = 30000;
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/** Center a mesh at the origin and scale it so its largest bbox extent = size. */
+function normalizeMesh(m: Mesh, size: number) {
+  const v = m.vertices;
+  let mnx = Infinity, mny = Infinity, mnz = Infinity;
+  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (let i = 0; i < v.length; i += 3) {
+    mnx = Math.min(mnx, v[i]); mxx = Math.max(mxx, v[i]);
+    mny = Math.min(mny, v[i + 1]); mxy = Math.max(mxy, v[i + 1]);
+    mnz = Math.min(mnz, v[i + 2]); mxz = Math.max(mxz, v[i + 2]);
+  }
+  const cx = (mnx + mxx) / 2, cy = (mny + mxy) / 2, cz = (mnz + mxz) / 2;
+  const s = size / (Math.max(mxx - mnx, mxy - mny, mxz - mnz) || 1);
+  for (let i = 0; i < v.length; i += 3) {
+    v[i] = (v[i] - cx) * s;
+    v[i + 1] = (v[i + 1] - cy) * s;
+    v[i + 2] = (v[i + 2] - cz) * s;
+  }
 }
 
 async function main() {
@@ -39,21 +67,19 @@ async function main() {
     throw new Error('WebGL2 not supported');
   }
 
-  // Load mesh & precompute data
-  console.log('Loading Stanford Bunny...');
-  const mesh = await loadOBJ('/models/stanford_bunny.obj');
-  console.log(`Loaded: ${mesh.vertices.length / 3} vertices, ${mesh.faces.length / 3} faces`);
-
-  const allEdges = extractAllEdges(mesh);
-  const vertexNormals = computeVertexNormals(mesh);
-  const vertexAdjacency = buildVertexAdjacency(mesh);
-  const principalDirs = computePrincipalDirections(mesh, vertexNormals, vertexAdjacency);
+  // Mesh + derived data — (re)populated by loadModel() so the model can switch.
+  let mesh: Mesh;
+  let allEdges: ReturnType<typeof extractAllEdges>;
+  let vertexNormals: Float32Array;
+  let vertexAdjacency: number[][];
+  let principalDirs: Float32Array;
 
   // ─── UI refs ───
   const modeSelect = document.getElementById('mode') as HTMLSelectElement;
   const meshControls = document.getElementById('mesh-controls') as HTMLDivElement;
   const modelingControls = document.getElementById('modeling-controls') as HTMLDivElement;
   const contourControls = document.getElementById('contour-controls') as HTMLDivElement;
+  const flowControls = document.getElementById('flow-controls') as HTMLDivElement;
   const splatControls = document.getElementById('splat-controls') as HTMLDivElement;
   const walkParams = document.getElementById('walk-params') as HTMLDivElement;
   const curveParams = document.getElementById('curve-params') as HTMLDivElement;
@@ -65,16 +91,18 @@ async function main() {
 
   const thicknessInput = document.getElementById('thickness') as HTMLInputElement;
   const colorSelect = document.getElementById('color') as HTMLSelectElement;
+  const modelSelect = document.getElementById('model-select') as HTMLSelectElement;
   const bgColorInput = document.getElementById('bg-color') as HTMLInputElement;
-  const baseColorInput = document.getElementById('c-base') as HTMLInputElement;
+  const colorAInput = document.getElementById('c-a') as HTMLInputElement;
+  const colorBInput = document.getElementById('c-b') as HTMLInputElement;
+  const colorStrip = document.getElementById('color-strip') as HTMLDivElement;
+  const profileCanvas = document.getElementById('profile-canvas') as HTMLCanvasElement;
   const clTypeSelect = document.getElementById('cl-type') as HTMLSelectElement;
   const clStrategySelect = document.getElementById('cl-strategy') as HTMLSelectElement;
   const ctAxisSelect = document.getElementById('ct-axis') as HTMLSelectElement;
   const showReferenceCheck = document.getElementById('show-reference') as HTMLInputElement;
   const genClusterBtn = document.getElementById('gen-cluster') as HTMLButtonElement;
   const clearBtn = document.getElementById('clear-curves') as HTMLButtonElement;
-
-  edgeCountDisplay.textContent = String(allEdges.length);
 
   // ─── State ───
   let currentMode: RenderMode = modeSelect.value as RenderMode;
@@ -87,30 +115,68 @@ async function main() {
   // Contour params
   let contourAxis = ctAxisSelect.value as ContourAxis;
   let contourLevels = 24;
-  let contourHueRange = 0;
+
+  // Flow field params
+  let ffDensity = 200;
+  let ffSteps = 40;
+  let ffNoiseScale = 35;
+  let ffWander = 0.08;
+  let ffSmoothing = 2;
+  let ffVariant = 0;
+
+  // Interactive width-profile editor; sampled per-segment along each stroke.
+  const profileEditor = new ProfileEditor(profileCanvas, () => regenerate());
 
   // Global, live styling shared by every cluster.
   const style: ClusterStyle = {
     count: 12, spread: 6,
     steps: 80, wander: 0.1, noiseScale: 40, smoothing: 2,
     samples: 24, tangentMult: 0.6,
-    radius: 4, overlap: 1, scaleMul: 1, opacity: 1,
-    baseColor: hexToRgb(baseColorInput.value),
+    radius: 4, overlap: 1, scaleMul: 1,
+    profile: (t) => profileEditor.sample(t),
+    colorA: hexToRgb(colorAInput.value),
+    colorB: hexToRgb(colorBInput.value),
     hueJitter: 0.1, brightJitter: 0.2,
+    opacity: 1, opacityB: 1,
     widthVar: 0.3, opacityVar: 0.2, lengthVar: 0.3,
   };
 
   let clusterSeeds: ClusterSeed[] = [];
   let meshRefGaussians: Gaussian3D[] = [];
 
-  // Camera & renderer
+  // Camera & renderer (camera framing is set by loadModel once the mesh loads).
   const camera = new OrbitCamera(canvas);
-  camera.distance = 0.8;
-  camera.target = [0, 0.1, 0];
-  camera.updatePosition();
 
   const renderer = new GaussianSplatRenderer(gl);
   renderer.backgroundColor = hexToRgb(bgColorInput.value);
+
+  function updateColorStrip() {
+    colorStrip.style.background = `linear-gradient(90deg, ${colorAInput.value}, ${colorBInput.value})`;
+  }
+  updateColorStrip();
+
+  // Load (or switch) the model: normalize it, recompute derived data, reframe.
+  async function loadModel(file: string) {
+    mesh = await loadOBJ('/models/' + file);
+    normalizeMesh(mesh, MODEL_SIZE);
+    const before = mesh.vertices.length / 3;
+    mesh = decimateMesh(mesh, MAX_VERTS);
+    const after = mesh.vertices.length / 3;
+    if (after < before) console.log(`Decimated ${file}: ${before} → ${after} verts`);
+    allEdges = extractAllEdges(mesh);
+    vertexNormals = computeVertexNormals(mesh);
+    vertexAdjacency = buildVertexAdjacency(mesh);
+    principalDirs = computePrincipalDirections(mesh, vertexNormals, vertexAdjacency);
+    edgeCountDisplay.textContent = String(allEdges.length);
+
+    clusterSeeds = [];               // seeds index vertices — invalid for a new mesh
+    camera.target = [0, 0, 0];
+    camera.distance = MODEL_SIZE * 1.9;
+    camera.near = MODEL_SIZE * 0.002;
+    camera.far = MODEL_SIZE * 20;
+    camera.updatePosition();
+    regenerate();
+  }
 
   function buildMeshReferenceGaussians() {
     meshRefGaussians = edgesToGaussians(mesh, allEdges, 1.5, 'white').map((g) => ({
@@ -133,11 +199,36 @@ async function main() {
         overlap: style.overlap,
         scaleMul: style.scaleMul,
         opacity: style.opacity,
-        baseColor: style.baseColor,
-        hueRange: contourHueRange,
+        opacityB: style.opacityB,
+        colorA: style.colorA,
+        colorB: style.colorB,
+        hueJitter: style.hueJitter,
+        brightJitter: style.brightJitter,
       });
       renderer.setGaussians(gaussians);
       clusterCountDisplay.textContent = String(contourLevels);
+      splatCountDisplay.textContent = String(gaussians.length);
+    } else if (currentMode === 'flow') {
+      const gaussians = flowFieldToGaussians(mesh, vertexAdjacency, vertexNormals, {
+        density: ffDensity,
+        steps: ffSteps,
+        wander: ffWander,
+        smoothing: ffSmoothing,
+        noiseScale: ffNoiseScale,
+        variant: ffVariant,
+        radius: style.radius,
+        overlap: style.overlap,
+        scaleMul: style.scaleMul,
+        profile: style.profile,
+        opacity: style.opacity,
+        opacityB: style.opacityB,
+        colorA: style.colorA,
+        colorB: style.colorB,
+        hueJitter: style.hueJitter,
+        brightJitter: style.brightJitter,
+      });
+      renderer.setGaussians(gaussians);
+      clusterCountDisplay.textContent = String(Math.round(ffDensity));
       splatCountDisplay.textContent = String(gaussians.length);
     } else {
       let all: Gaussian3D[] = [];
@@ -158,13 +249,18 @@ async function main() {
   function updateUIVisibility() {
     const modeling = currentMode === 'modeling';
     const contours = currentMode === 'contours';
-    const mesh = currentMode === 'wireframe' || currentMode === 'silhouette';
-    meshControls.style.display = mesh ? 'block' : 'none';
+    const flow = currentMode === 'flow';
+    const meshMode = currentMode === 'wireframe' || currentMode === 'silhouette';
+    const splat = modeling || contours || flow;
+    meshControls.style.display = meshMode ? 'block' : 'none';
     modelingControls.style.display = modeling ? 'block' : 'none';
     contourControls.style.display = contours ? 'block' : 'none';
-    splatControls.style.display = modeling || contours ? 'block' : 'none';
-    meshInfo.style.display = mesh ? 'inline' : 'none';
-    curveInfo.style.display = mesh ? 'none' : 'inline';
+    flowControls.style.display = flow ? 'block' : 'none';
+    splatControls.style.display = splat ? 'block' : 'none';
+    meshInfo.style.display = meshMode ? 'inline' : 'none';
+    curveInfo.style.display = meshMode ? 'none' : 'inline';
+    // The profile canvas needs a real size once its panel is visible.
+    if (splat) profileEditor.resize();
   }
 
   function updateStrandParamVisibility() {
@@ -202,6 +298,7 @@ async function main() {
   bindRange('g-overlap', (v) => (style.overlap = v), (v) => v.toFixed(2) + '×');
   bindRange('g-scale', (v) => (style.scaleMul = v), (v) => v.toFixed(1) + '×');
   bindRange('g-opacity', (v) => (style.opacity = v), (v) => v.toFixed(2));
+  bindRange('g-opacity-b', (v) => (style.opacityB = v), (v) => v.toFixed(2));
   bindRange('g-width-var', (v) => (style.widthVar = v), (v) => v.toFixed(2));
   bindRange('g-opacity-var', (v) => (style.opacityVar = v), (v) => v.toFixed(2));
   // Colour jitter
@@ -209,7 +306,13 @@ async function main() {
   bindRange('c-bright-jitter', (v) => (style.brightJitter = v), (v) => v.toFixed(2));
   // Contours
   bindRange('ct-levels', (v) => (contourLevels = v), (v) => String(Math.round(v)));
-  bindRange('ct-huerange', (v) => (contourHueRange = v), (v) => v.toFixed(2));
+  // Flow field
+  bindRange('ff-density', (v) => (ffDensity = v), (v) => String(Math.round(v)));
+  bindRange('ff-steps', (v) => (ffSteps = v), (v) => String(Math.round(v)));
+  bindRange('ff-noise', (v) => (ffNoiseScale = v), (v) => v.toFixed(0));
+  bindRange('ff-wander', (v) => (ffWander = v), (v) => v.toFixed(2));
+  bindRange('ff-smooth', (v) => (ffSmoothing = v), (v) => String(Math.round(v)));
+  bindRange('ff-variant', (v) => (ffVariant = v), (v) => String(Math.round(v)));
   // Mesh line thickness
   bindRange('thickness', (v) => (lineThickness = v), (v) => v.toFixed(1) + ' px');
 
@@ -229,10 +332,23 @@ async function main() {
     renderer.backgroundColor = hexToRgb(bgColorInput.value);
   });
 
-  baseColorInput.addEventListener('input', () => {
-    style.baseColor = hexToRgb(baseColorInput.value);
+  colorAInput.addEventListener('input', () => {
+    style.colorA = hexToRgb(colorAInput.value);
+    updateColorStrip();
     regenerate();
   });
+  colorBInput.addEventListener('input', () => {
+    style.colorB = hexToRgb(colorBInput.value);
+    updateColorStrip();
+    regenerate();
+  });
+
+  // Width-profile preset buttons load shapes into the editor.
+  document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => profileEditor.loadPreset(btn.dataset.preset!));
+  });
+
+  modelSelect.addEventListener('change', () => { void loadModel(modelSelect.value); });
 
   // Strand type / strategy are stored per-cluster at creation, so changing them
   // only affects the NEXT cluster — no regenerate of existing clusters.
@@ -269,10 +385,10 @@ async function main() {
     hdr.addEventListener('click', () => hdr.parentElement!.classList.toggle('collapsed'));
   });
 
-  // Initial render
+  // Initial UI state + load the selected model (which triggers the first render).
   updateUIVisibility();
   updateStrandParamVisibility();
-  regenerate();
+  await loadModel(modelSelect.value);
 
   // Silhouette recompute on camera move
   let lastCamPos = [...camera.position] as [number, number, number];
