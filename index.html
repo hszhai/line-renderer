@@ -203,6 +203,19 @@
           <label>Background Color</label>
           <input type="color" id="bg-color" value="#0a0a0a" />
         </div>
+        <div class="section-title">Depth Blur</div>
+        <div class="row">
+          <div class="control-group">
+            <label>Strength <span class="hint">(far blur)</span></label>
+            <input type="range" id="dof-strength" min="0" max="1" step="0.02" value="0" />
+            <div class="value-display" id="dof-strength-val">0.00</div>
+          </div>
+          <div class="control-group">
+            <label>Focus <span class="hint">(sharp depth)</span></label>
+            <input type="range" id="dof-focus" min="0" max="0.6" step="0.02" value="0.3" />
+            <div class="value-display" id="dof-focus-val">0.30</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -439,6 +452,17 @@
               <label>Offset Angle <span class="hint">(around tangent)</span></label>
               <input type="range" id="sp-offset-angle" min="0" max="360" step="1" value="0" />
               <div class="value-display" id="sp-offset-angle-val">0°</div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="control-group">
+              <label>Offset Count <span class="hint">(companions)</span></label>
+              <input type="range" id="sp-offset-count" min="1" max="12" step="1" value="1" />
+              <div class="value-display" id="sp-offset-count-val">1</div>
+            </div>
+            <div class="control-group">
+              <label>Along Z <span class="hint">(depth axis)</span></label>
+              <input type="checkbox" id="sp-alongz" />
             </div>
           </div>
           <div class="control-group">
