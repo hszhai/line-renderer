@@ -74,6 +74,13 @@ export class GaussianSplatRenderer {
   viewportHeight = 1;
   backgroundColor: [number, number, number] = [0.04, 0.04, 0.04];
 
+  // Depth blur (a far-side depth-of-field): splats deeper than `dofFocus` (in
+  // world/camera-space units) get their 2D covariance dilated, so they render
+  // as larger, softer blobs. `dofStrength` is the blur std-dev in pixels per
+  // world unit of depth beyond focus. 0 disables it.
+  dofFocus = 0.3;
+  dofStrength = 0;
+
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.program = this.createProgram(VERT_SRC, FRAG_SRC);
@@ -274,9 +281,12 @@ export class GaussianSplatRenderer {
       let cov2d_xy = j00 * j11 * sig01 + j00 * j12 * sig02 + j02 * j11 * sig12 + j02 * j12 * sig22;
       let cov2d_yy = j11 * j11 * sig11 + 2 * j11 * j12 * sig12 + j12 * j12 * sig22;
 
-      // Add epsilon for numerical stability (keeps very thin lines renderable)
-      cov2d_xx += 0.15;
-      cov2d_yy += 0.15;
+      // Epsilon for numerical stability (keeps very thin lines renderable),
+      // plus an optional depth-blur dilation that grows with depth beyond focus.
+      const blurPx = this.dofStrength * Math.max(0, -z - this.dofFocus);
+      const dilate = 0.15 + blurPx * blurPx;
+      cov2d_xx += dilate;
+      cov2d_yy += dilate;
 
       // Compute conic (inverse of 2D covariance)
       const conic = invertSym2D(cov2d_xx, cov2d_xy, cov2d_yy);

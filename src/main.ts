@@ -108,6 +108,11 @@ async function main() {
   const showReferenceCheck = document.getElementById('show-reference') as HTMLInputElement;
   const genClusterBtn = document.getElementById('gen-cluster') as HTMLButtonElement;
   const genSplineBtn = document.getElementById('gen-spline') as HTMLButtonElement;
+  const splineAlongZCheck = document.getElementById('sp-alongz') as HTMLInputElement;
+  const dofStrengthInput = document.getElementById('dof-strength') as HTMLInputElement;
+  const dofStrengthVal = document.getElementById('dof-strength-val') as HTMLDivElement;
+  const dofFocusInput = document.getElementById('dof-focus') as HTMLInputElement;
+  const dofFocusVal = document.getElementById('dof-focus-val') as HTMLDivElement;
   const clearBtn = document.getElementById('clear-curves') as HTMLButtonElement;
 
   // ─── State ───
@@ -138,8 +143,10 @@ async function main() {
   let splineContinuity = 0;
   let splineSamples = 24;
   let splineVariant = 1;
-  let splineOffset = 0;       // companion-curve distance (0 = none)
-  let splineOffsetAngle = 0;  // direction around the tangent (degrees)
+  let splineOffset = 0;        // companion-curve distance (0 = none)
+  let splineOffsetAngle = 0;   // direction around the tangent (degrees)
+  let splineOffsetCount = 1;   // number of companions around the curve
+  let splineAlongZ = false;    // run the curve along the depth (z) axis
 
   // Interactive width-profile editor; sampled per-segment along each stroke.
   const profileEditor = new ProfileEditor(profileCanvas, () => regenerate());
@@ -249,12 +256,12 @@ async function main() {
       clusterCountDisplay.textContent = String(Math.round(ffDensity));
       splatCountDisplay.textContent = String(gaussians.length);
     } else if (currentMode === 'spline') {
-      // Random start/end in a box around the model, interior points off the line.
+      // Random start/end (or a run along Z), interior points scattered off the line.
       const rng = createRng((Math.round(splineVariant) * 2654435761) >>> 0);
       const box = MODEL_SIZE * 0.6;
       const rp = (): number => (rng() * 2 - 1) * box;
-      const start: [number, number, number] = [rp(), rp(), rp()];
-      const end: [number, number, number] = [rp(), rp(), rp()];
+      const start: [number, number, number] = splineAlongZ ? [0, 0, -box] : [rp(), rp(), rp()];
+      const end: [number, number, number] = splineAlongZ ? [0, 0, box] : [rp(), rp(), rp()];
       const ctrl = randomPointsBetween(start, end, splinePoints, splineSpread, rng);
       const curve = splineThroughPoints(ctrl, {
         tension: splineTension, bias: splineBias, continuity: splineContinuity,
@@ -266,9 +273,13 @@ async function main() {
         style.colorA, style.colorB, style.profile
       );
       let gaussians = tube(curve);
-      // Optional companion curve, offset via the parallel-transport frame.
+      // A cluster of offset companions evenly spaced around the tangent.
       if (splineOffset > 1e-6) {
-        gaussians = gaussians.concat(tube(offsetCurve(curve, splineOffset, splineOffsetAngle)));
+        const cnt = Math.max(1, Math.round(splineOffsetCount));
+        for (let k = 0; k < cnt; k++) {
+          const ang = splineOffsetAngle + (k * 360) / cnt;
+          gaussians = gaussians.concat(tube(offsetCurve(curve, splineOffset, ang)));
+        }
       }
       renderer.setGaussians(gaussians);
       clusterCountDisplay.textContent = String(splinePoints);
@@ -358,6 +369,7 @@ async function main() {
   bindRange('sp-samples', (v) => (splineSamples = v), (v) => String(Math.round(v)));
   bindRange('sp-offset', (v) => (splineOffset = v), (v) => v.toFixed(3));
   bindRange('sp-offset-angle', (v) => (splineOffsetAngle = v), (v) => Math.round(v) + '°');
+  bindRange('sp-offset-count', (v) => (splineOffsetCount = v), (v) => String(Math.round(v)));
   // Contours
   bindRange('ct-levels', (v) => (contourLevels = v), (v) => String(Math.round(v)));
   // Flow field
@@ -433,6 +445,23 @@ async function main() {
     splineVariant = Math.floor(Math.random() * 100000);
     regenerate();
   });
+
+  splineAlongZCheck.addEventListener('change', () => {
+    splineAlongZ = splineAlongZCheck.checked;
+    regenerate();
+  });
+
+  // Depth blur sets renderer fields directly (used every frame; no rebuild).
+  function applyDof() {
+    const s = parseFloat(dofStrengthInput.value);
+    renderer.dofStrength = s * 500;           // px std-dev per world unit beyond focus
+    renderer.dofFocus = parseFloat(dofFocusInput.value);
+    dofStrengthVal.textContent = s.toFixed(2);
+    dofFocusVal.textContent = renderer.dofFocus.toFixed(2);
+  }
+  dofStrengthInput.addEventListener('input', applyDof);
+  dofFocusInput.addEventListener('input', applyDof);
+  applyDof();
 
   clearBtn.addEventListener('click', () => {
     clusterSeeds = [];
